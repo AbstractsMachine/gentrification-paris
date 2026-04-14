@@ -9,6 +9,7 @@ Principes :
 from __future__ import annotations
 
 import hashlib
+import re
 import zipfile
 from pathlib import Path
 
@@ -49,6 +50,25 @@ def fetch(url: str, dest: Path, desc: str = "") -> bool:
     except Exception as e:
         print(f"  [x]  {e}")
         return False
+
+
+def scrape_insee_downloads(page_id: str,
+                           extensions=(".zip", ".xlsx", ".xls", ".csv")
+                           ) -> list[str]:
+    """Scrape une page INSEE et retourne les URLs de fichiers téléchargeables."""
+    try:
+        r = requests.get(f"https://www.insee.fr/fr/statistiques/{page_id}",
+                         timeout=30)
+        if r.status_code != 200:
+            return []
+    except Exception:
+        return []
+    ext_re = "|".join(re.escape(e) for e in extensions)
+    urls = re.findall(
+        rf'href="(/fr/statistiques/fichier/{page_id}/[^"]+(?:{ext_re}))"',
+        r.text,
+    )
+    return ["https://www.insee.fr" + u for u in urls]
 
 
 def fetch_iris_year(year: int) -> Path | None:
@@ -155,33 +175,54 @@ def fetch_filosofi_year(year: int) -> Path | None:
     pid = INSEE_PAGES_FILOSOFI.get(year)
     if not pid:
         print(f"  [..] FiLoSoFi {year}: page INSEE non renseignée "
-              f"(cf. MANIFEST.md)")
+              f"(cf. config.INSEE_PAGES_FILOSOFI)")
         return None
 
-    for base in [f"BASE_TD_FILO_DISP_IRIS_{year}",
-                 f"base-ic-disp-menages-{year}",
-                 f"base-cc-filosofi-{year}"]:
-        for ext in ["_xlsx.zip", ".zip", "_csv.zip"]:
-            url = f"https://www.insee.fr/fr/statistiques/fichier/{pid}/{base}{ext}"
-            zp = DATA_RAW / f"filosofi_{year}.zip"
-            try:
-                r = requests.get(url, timeout=180)
-                if r.status_code == 200 and len(r.content) > 10_000:
-                    zp.write_bytes(r.content)
-                    with zipfile.ZipFile(zp) as zf:
-                        cands = sorted(
-                            [n for n in zf.namelist()
-                             if n.endswith((".csv", ".xls", ".xlsx"))],
-                            key=lambda n: zf.getinfo(n).file_size, reverse=True,
-                        )
-                        if cands:
-                            zf.extract(cands[0], DATA_RAW)
-                            out = DATA_RAW / cands[0]
-                            print(f"  [ok] FiLoSoFi {year}: extrait {cands[0]}")
-                            return out
-            except Exception:
-                continue
-    return None
+    # Scrape la page INSEE pour trouver les URLs de téléchargement réels.
+    # Préfère le revenu *disponible* (DISP) au revenu *déclaré* (DEC) — cf.
+    # METHODOLOGY §4.3. Le format XLSX prime sur CSV pour simplicité de parse.
+    downloads = scrape_insee_downloads(pid)
+    if not downloads:
+        print(f"  [x]  FiLoSoFi {year}: page {pid} inaccessible")
+        return None
+
+    def priority(url: str) -> tuple:
+        u = url.upper()
+        # score : plus bas = prioritaire
+        iris = 0 if "IRIS" in u else 1
+        disp = 0 if "DISP" in u else 1
+        # "XLSX" OU typo INSEE "XSLX"
+        xl = 0 if ("XLSX" in u or "XSLX" in u) else 1
+        return (iris, disp, xl)
+
+    downloads.sort(key=priority)
+    chosen = downloads[0]
+    print(f"  [dl] FiLoSoFi {year} <- {chosen.split('/')[-1]}")
+    zp = DATA_RAW / f"filosofi_{year}_{chosen.split('/')[-1]}"
+    try:
+        r = requests.get(chosen, timeout=180)
+        if r.status_code != 200 or len(r.content) < 10_000:
+            print(f"  [x]  téléchargement échoué ({r.status_code})")
+            return None
+        zp.write_bytes(r.content)
+        if zp.suffix == ".zip":
+            with zipfile.ZipFile(zp) as zf:
+                cands = sorted(
+                    [n for n in zf.namelist()
+                     if n.endswith((".csv", ".xls", ".xlsx"))],
+                    key=lambda n: zf.getinfo(n).file_size, reverse=True,
+                )
+                if cands:
+                    zf.extract(cands[0], DATA_RAW)
+                    out = DATA_RAW / cands[0]
+                    print(f"  [ok] FiLoSoFi {year}: extrait {cands[0]} "
+                          f"({len(r.content)/1024/1024:.1f} Mo zip)")
+                    return out
+        print(f"  [ok] FiLoSoFi {year}: {zp.name}")
+        return zp
+    except Exception as e:
+        print(f"  [x]  FiLoSoFi {year}: {e.__class__.__name__}")
+        return None
 
 
 def fetch_iris_crosswalk() -> Path | None:
@@ -217,35 +258,45 @@ def fetch_long_series() -> Path | None:
             print(f"  [ok] séries longues: {hits[0].name}")
             return hits[0]
 
-    pid = INSEE_PAGE_LONG_SERIES
-    for name in ["base-cc-serie-historique",
-                 "base-cc-serie-longue-1968",
-                 "base-cc-evol-struct-pop-1968-2022"]:
-        for ext in [".xlsx", "_xlsx.zip", ".zip"]:
-            url = f"https://www.insee.fr/fr/statistiques/fichier/{pid}/{name}{ext}"
-            zp = DATA_RAW / f"long_series{ext if ext.endswith('.xlsx') else '.zip'}"
-            try:
-                r = requests.get(url, timeout=180)
-                if r.status_code == 200 and len(r.content) > 10_000:
-                    zp.write_bytes(r.content)
-                    if zp.suffix == ".zip":
-                        with zipfile.ZipFile(zp) as zf:
-                            cands = sorted(
-                                [n for n in zf.namelist()
-                                 if n.endswith((".xls", ".xlsx", ".csv"))],
-                                key=lambda n: zf.getinfo(n).file_size, reverse=True,
-                            )
-                            if cands:
-                                zf.extract(cands[0], DATA_RAW)
-                                out = DATA_RAW / cands[0]
-                                print(f"  [ok] séries longues : extrait {cands[0]}")
-                                return out
-                    else:
-                        print(f"  [ok] séries longues : {zp.name}")
-                        return zp
-            except Exception:
-                continue
-    return None
+    # La page INSEE 1893185 expose plusieurs fichiers (csp, csp×dipl,
+    # emploi×sexe…). On veut "pop-act2554-csp-cd-{68-22}.zip" (population
+    # active 25-54 ans × CSP, niveau commune-département 1968-2022).
+    downloads = scrape_insee_downloads(INSEE_PAGE_LONG_SERIES)
+    if not downloads:
+        print(f"  [x]  séries longues : page INSEE inaccessible")
+        return None
+
+    def priority(url: str) -> tuple:
+        u = url.lower()
+        csp = 0 if "csp" in u and "dipl" not in u and "sa" not in u else 1
+        has_cd = 0 if "-cd-" in u else 1
+        return (csp, has_cd)
+
+    downloads.sort(key=priority)
+    chosen = downloads[0]
+    print(f"  [dl] séries longues <- {chosen.split('/')[-1]}")
+    zp = DATA_RAW / chosen.split("/")[-1]
+    try:
+        r = requests.get(chosen, timeout=180)
+        if r.status_code != 200 or len(r.content) < 10_000:
+            return None
+        zp.write_bytes(r.content)
+        if zp.suffix == ".zip":
+            with zipfile.ZipFile(zp) as zf:
+                cands = sorted(
+                    [n for n in zf.namelist()
+                     if n.endswith((".xls", ".xlsx", ".csv"))],
+                    key=lambda n: zf.getinfo(n).file_size, reverse=True,
+                )
+                if cands:
+                    zf.extract(cands[0], DATA_RAW)
+                    out = DATA_RAW / cands[0]
+                    print(f"  [ok] séries longues : extrait {cands[0]}")
+                    return out
+        return zp
+    except Exception as e:
+        print(f"  [x]  séries longues : {e.__class__.__name__}")
+        return None
 
 
 def fetch_commune_contours(dep_codes: list[str]) -> Path | None:

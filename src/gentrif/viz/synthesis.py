@@ -72,8 +72,9 @@ def plot_level_typology(gdf: gpd.GeoDataFrame, label: str, path: Path) -> None:
     ax.set_title(f"Géographie sociale (niveau) — {label} ({y})",
                  fontsize=13, fontweight="bold", pad=15)
     fig.text(0.5, 0.01,
-             "Niveau du ratio CPIS / classes populaires — décrit un état, "
-             "pas un processus.",
+             f"Niveau du ratio CPIS / classes populaires — décrit un état, "
+             f"pas un processus. Quantiles calculés sur {label} (pas "
+             f"comparable entre périmètres différents).",
              ha="center", fontsize=7, color="gray", style="italic")
     plt.savefig(path, dpi=200, bbox_inches="tight", facecolor="white")
     plt.close()
@@ -142,8 +143,9 @@ def plot_trajectory(gdf_t0: gpd.GeoDataFrame,
     ax.set_title(f"Trajectoires socio-spatiales — {label} ({y0} → {y1})",
                  fontsize=13, fontweight="bold", pad=15)
     fig.text(0.5, 0.01,
-             "Niveau initial (médiane à t0) × évolution du ratio CPIS / "
-             "classes populaires.",
+             f"Niveau initial (médiane à t0) × évolution du ratio CPIS / "
+             f"classes populaires. Médiane calculée sur {label} (pas "
+             f"comparable entre périmètres différents).",
              ha="center", fontsize=7, color="gray", style="italic")
     plt.savefig(path, dpi=200, bbox_inches="tight", facecolor="white")
     plt.close()

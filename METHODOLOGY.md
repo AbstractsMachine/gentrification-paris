@@ -245,9 +245,20 @@ Choix retenus :
 ## 5. Limites assumées
 
 - **Secret statistique**. Les IRIS de très faible population voient
-  certaines variables masquées ou arrondies par l'INSEE. Ces cas
-  n'ont pas été exclus mais produiront des valeurs aberrantes en
-  queue de distribution.
+  certaines variables masquées ou arrondies par l'INSEE, produisant des
+  valeurs aberrantes en queue de distribution.
+- **IRIS non-résidentiels** (Bois de Boulogne, Bois de Vincennes,
+  cimetière du Père-Lachaise, Cité Universitaire, hippodromes, grands
+  parcs…). Ces IRIS ont des dénominateurs de l'ordre de 10¹–10²
+  habitants (gardiens, logements de fonction), ce qui rend
+  `ratio_gentrif` instable : un unique ménage cadre peut faire basculer
+  la trajectoire. On les écarte via deux règles cumulables
+  (`loaders._non_residential_mask`) :
+  (1) seuil `MIN_POP_ACTIVE` (défaut 200) sur `pop15p` ;
+  (2) correspondance libellé (`NON_RESIDENTIAL_KEYWORDS` dans `config.py`).
+  Les indicateurs sont passés à `NaN` (pas supprimés) : ces IRIS
+  apparaissent en gris sur les cartes, explicitement signalés comme
+  non-interprétables plutôt que confondus avec des "données manquantes".
 - **Résolution temporelle IRIS pour la période Clerval**. Les fichiers
   IRIS 1982, 1990, 1999 ne sont pas en open data. Nous utilisons les
   80 quartiers administratifs de Paris (APUR) comme *proxy de résolution*

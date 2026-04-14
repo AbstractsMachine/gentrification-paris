@@ -6,6 +6,8 @@ Consomme les parquet long de data/processed et les contours de data/raw.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import geopandas as gpd
 import pandas as pd
 
@@ -16,6 +18,26 @@ from gentrif.config import (
     OUT_TABLES,
     SCOPES,
 )
+
+# Cartes de synthèse (grand_paris, indicateurs structurants) → key_maps/.
+# Tout le reste (Paris-seul, petite-couronne, indicateurs symétriques ou
+# de triangulation) → annexes/. Le routage est purement conventionnel et
+# fondé sur le nom de fichier pour rester transparent.
+_KEY_PREFIXES: tuple[str, ...] = (
+    "trajectoire_grand_paris",
+    "long_trajectoire_grand_paris",
+    "multitemp_cpis_grand_paris",
+    "long_multitemp_cpis_grand_paris",
+    "niveau_grand_paris",
+    "evol_cpis_grand_paris",
+)
+
+
+def _fig(name: str) -> Path:
+    sub = "key_maps" if name.startswith(_KEY_PREFIXES) else "annexes"
+    d = OUT_FIGURES / sub
+    d.mkdir(parents=True, exist_ok=True)
+    return d / name
 from gentrif.loaders import (
     load_commune_contours_gdf,
     load_historical_quartiers,
@@ -66,18 +88,13 @@ def run_iris_maps() -> None:
             if len(mg) == 0:
                 continue
             gdfs[y] = mg
-            plot_map(mg, "pct_cpis", f"CPIS — {label} ({y})",
-                     OUT_FIGURES / f"cpis_{scope}_{y}.png", cmap="Blues")
-            plot_map(mg, "pct_classes_pop",
-                     f"Ouv.+Empl. — {label} ({y})",
-                     OUT_FIGURES / f"classes_pop_{scope}_{y}.png", cmap="Reds")
 
         if len(gdfs) >= 2:
             plot_multitemp(gdfs, "pct_cpis", f"CPIS — {label}",
-                           OUT_FIGURES / f"multitemp_cpis_{scope}.png", "Blues")
+                           _fig(f"multitemp_cpis_{scope}.png"), "Blues")
             plot_multitemp(gdfs, "pct_classes_pop",
                            f"Ouv.+Empl. — {label}",
-                           OUT_FIGURES / f"multitemp_cp_{scope}.png", "Reds")
+                           _fig(f"multitemp_cp_{scope}.png"), "Reds")
 
             ys = sorted(gdfs)
             first, last = ys[0], ys[-1]
@@ -96,11 +113,11 @@ def run_iris_maps() -> None:
             if len(eg):
                 plot_map(eg, "evol_cpis",
                          f"Δ CPIS {first}→{last} — {label}",
-                         OUT_FIGURES / f"evol_cpis_{scope}_{first}_{last}.png",
+                         _fig(f"evol_cpis_{scope}_{first}_{last}.png"),
                          diverging=True)
                 plot_map(eg, "evol_cp",
                          f"Δ Ouv+Empl {first}→{last} — {label}",
-                         OUT_FIGURES / f"evol_cp_{scope}_{first}_{last}.png",
+                         _fig(f"evol_cp_{scope}_{first}_{last}.png"),
                          diverging=True)
 
         if gdfs:
@@ -108,16 +125,16 @@ def run_iris_maps() -> None:
             if "pct_etr" in gdfs[ly] and gdfs[ly]["pct_etr"].sum() > 0:
                 plot_map(gdfs[ly], "pct_etr",
                          f"Pop. étrangère — {label} ({ly})",
-                         OUT_FIGURES / f"pop_etr_{scope}_{ly}.png", cmap="YlOrRd")
+                         _fig(f"pop_etr_{scope}_{ly}.png"), cmap="YlOrRd")
             plot_level_typology(
                 gdfs[ly], label,
-                OUT_FIGURES / f"niveau_{scope}_{ly}.png",
+                _fig(f"niveau_{scope}_{ly}.png"),
             )
             if len(gdfs) >= 2:
                 fy = min(gdfs)
                 plot_trajectory(
                     gdfs[fy], gdfs[ly], label,
-                    OUT_FIGURES / f"trajectoire_{scope}_{fy}_{ly}.png",
+                    _fig(f"trajectoire_{scope}_{fy}_{ly}.png"),
                 )
 
 
@@ -159,7 +176,7 @@ def run_filosofi_maps() -> None:
         fy, ly = min(gdfs), max(gdfs)
         from gentrif.viz import plot_trajectory as _pt
         _pt(gdfs[fy], gdfs[ly], f"{label} (revenus)",
-            OUT_FIGURES / f"trajectoire_revenus_{scope}_{fy}_{ly}.png")
+            _fig(f"trajectoire_revenus_{scope}_{fy}_{ly}.png"))
 
 
 def run_long_series_maps() -> None:
@@ -194,20 +211,16 @@ def run_long_series_maps() -> None:
             mg = contours.merge(sub, on="CODGEO", how="inner")
             if len(mg):
                 gdfs[int(y)] = mg
-                plot_map(mg, "pct_cpis",
-                         f"CPIS (actifs) — {label} ({y})",
-                         OUT_FIGURES / f"long_cpis_{scope}_{y}.png",
-                         cmap="Blues")
 
         if len(gdfs) >= 2:
             plot_multitemp(gdfs, "pct_cpis",
                            f"CPIS (actifs) — {label}",
-                           OUT_FIGURES / f"long_multitemp_cpis_{scope}.png",
+                           _fig(f"long_multitemp_cpis_{scope}.png"),
                            "Blues")
             fy, ly = min(gdfs), max(gdfs)
             from gentrif.viz import plot_trajectory as _pt
             _pt(gdfs[fy], gdfs[ly], f"{label} (tendance longue)",
-                OUT_FIGURES / f"long_trajectoire_{scope}_{fy}_{ly}.png",
+                _fig(f"long_trajectoire_{scope}_{fy}_{ly}.png"),
                 key="CODGEO")
 
 

@@ -58,7 +58,15 @@ def plot_map(gdf: gpd.GeoDataFrame, col: str, title: str,
 
     ax.set_axis_off()
     ax.set_title(title, fontsize=13, fontweight="bold", pad=15)
-    fig.text(0.5, 0.02, "Source: INSEE | D'après Clerval (2010)",
+    scheme_note = ("Échelle divergente centrée sur 0, bornée au q2/q98 "
+                   "du périmètre affiché."
+                   if diverging else
+                   "Discrétisation en quantiles calculés sur le périmètre "
+                   "affiché (pas comparable entre cartes de périmètres "
+                   "différents).")
+    fig.text(0.5, 0.035, scheme_note, ha="center", fontsize=7,
+             color="#444", style="italic")
+    fig.text(0.5, 0.015, "Source: INSEE | D'après Clerval (2010)",
              ha="center", fontsize=7, color="gray")
     plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
     plt.close()
@@ -100,6 +108,11 @@ def plot_multitemp(gdfs: dict[int, gpd.GeoDataFrame], col: str,
     fig.colorbar(sm, ax=axes, orientation="horizontal",
                  fraction=0.03, pad=0.05, shrink=0.6).set_label("%")
     fig.suptitle(title, fontsize=14, fontweight="bold", y=0.98)
+    fig.text(0.5, 0.005,
+             "Échelle linéaire commune aux années (q2/q98 sur l'ensemble "
+             "des millésimes du périmètre affiché) — comparable dans le "
+             "temps, pas comparable entre périmètres.",
+             ha="center", fontsize=7, color="#444", style="italic")
     plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
     plt.close()
     print(f"    [map] {path.name}")

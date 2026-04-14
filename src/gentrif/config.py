@@ -44,8 +44,13 @@ IRIS_YEARS: list[int] = [2007, 2012, 2017, 2022]
 # -- Millésimes quartier (période Clerval, données APUR)
 QUARTIER_YEARS: list[int] = [1982, 1990, 1999]
 
-# -- Millésimes FiLoSoFi IRIS (revenus fiscaux disponibles, dispos dès 2012)
-FILOSOFI_YEARS: list[int] = [2012, 2017, 2021]
+# -- Millésimes FiLoSoFi IRIS (revenus fiscaux disponibles).
+# 2021 en auto-fetch (page 8229323). 2014 à télécharger manuellement
+# depuis la page INSEE 3288151 ("Revenus, pauvreté et niveau de vie en
+# 2014 (IRIS)"), fichier "Base IRIS sur les revenus disponibles", à
+# déposer dans data/raw/ (le loader le détecte par pattern `*IRIS*2014*`).
+# Avec les deux millésimes, la trajectoire revenus 2014→2021 est calculée.
+FILOSOFI_YEARS: list[int] = [2014, 2021]
 
 # -- Identifiants INSEE des pages de téléchargement par millésime IRIS
 INSEE_PAGES: dict[int, str] = {
@@ -55,12 +60,13 @@ INSEE_PAGES: dict[int, str] = {
     2022: "8647014",
 }
 
-# -- Identifiants INSEE des pages FiLoSoFi IRIS par millésime (à compléter
-# au premier fetch ; cf. data/raw/MANIFEST.md §FiLoSoFi).
+# -- Identifiants INSEE des pages FiLoSoFi IRIS par millésime.
+# Pages de téléchargement publiques contenant les fichiers
+# `BASE_TD_FILO_*_IRIS_*` (revenus fiscaux disponibles et déclarés).
+# Les fetchers scrapent la page HTML pour trouver le fichier exact.
 INSEE_PAGES_FILOSOFI: dict[int, str] = {
-    2012: "",   # TODO
-    2017: "",   # TODO
-    2021: "",   # TODO
+    2017: "4507225",   # "Principaux indicateurs sur les revenus..."
+    2021: "8229323",   # "Revenus, pauvreté et niveau de vie en 2021 (Iris)"
 }
 
 # -- Table de passage IRIS inter-millésimes (Zenodo, cf. METHODOLOGY §4.4)
@@ -77,7 +83,7 @@ IRIS_CROSSWALK_FILENAME: str = "iris_crosswalk.csv"
 # -- Millésimes pour la tendance longue commune/arrondissement 1968-2022
 # (séries harmonisées INSEE, page 1893185). Points de recensement successifs ;
 # les actifs 25-54 ans sont l'univers commun de référence.
-LONG_SERIES_YEARS: list[int] = [1968, 1975, 1982, 1990, 1999, 2006, 2011, 2016, 2021]
+LONG_SERIES_YEARS: list[int] = [1968, 1975, 1982, 1990, 1999, 2006, 2011, 2016, 2022]
 
 # -- Page INSEE des séries harmonisées longues (communes France entière)
 INSEE_PAGE_LONG_SERIES: str = "1893185"
@@ -107,6 +113,24 @@ QUARTIERS_PARIS: dict[int, list[tuple[int, str]]] = {
     19: [(73, "Villette"), (74, "Pont-de-Flandre"), (75, "Amérique"), (76, "Combat")],
     20: [(77, "Belleville"), (78, "St-Fargeau"), (79, "Père-Lachaise"), (80, "Charonne")],
 }
+
+# -- Filtrage des IRIS non-résidentiels
+# Un IRIS à dénominateur quasi-nul (bois, cimetière, grand équipement)
+# produit des valeurs de ratio_gentrif aberrantes : un ménage cadre peut
+# faire basculer toute la catégorie. On masque ces IRIS (indicateurs →
+# NaN, rendu gris sur les cartes) via deux règles cumulables :
+#   1. seuil de population active/15+ en-deçà duquel l'IRIS est écarté
+#   2. liste de mots-clés appliquée au libellé (LIBIRIS)
+# Cf. METHODOLOGY.md §5 (limites de comparabilité, effets de petits nombres).
+MIN_POP_ACTIVE: int = 200
+NON_RESIDENTIAL_KEYWORDS: list[str] = [
+    "BOIS DE BOULOGNE", "BOIS DE VINCENNES",
+    "CIMETIERE", "CIMETIÈRE",
+    "PERE LACHAISE", "PERE-LACHAISE", "PÈRE LACHAISE", "PÈRE-LACHAISE",
+    "CITE UNIVERSITAIRE", "CITÉ UNIVERSITAIRE",
+    "HIPPODROME", "JARDIN DES PLANTES",
+    "PARC DES PRINCES", "ROLAND GARROS", "ROLAND-GARROS",
+]
 
 # -- Typologie en niveau (géographie sociale à une date donnée)
 # Quantiles appliqués sur `ratio_gentrif` (CPIS / classes populaires).

@@ -43,9 +43,11 @@ from gentrif.loaders import (
 
 def build_iris_long() -> pd.DataFrame:
     rows = []
-    crosswalk = load_iris_crosswalk()
-    if crosswalk is not None:
-        print(f"  [ok] crosswalk IRIS chargé : {len(crosswalk):,} mappings")
+
+    # Table de passage Chabriel (Zenodo) — couvre effectivement 1999-2023
+    # (plus large que les 2010-2020 annoncés). On harmonise tout vers le
+    # zonage 2022, année cible du dernier recensement IRIS.
+    TARGET_YEAR = 2022
 
     for year in IRIS_YEARS:
         path = fetch_iris_year(year)
@@ -56,9 +58,19 @@ def build_iris_long() -> pd.DataFrame:
         if df is None or df.empty:
             continue
 
-        if crosswalk is not None:
-            df = apply_crosswalk_wide(df, crosswalk, iris_col="IRIS")
-            print(f"     crosswalk appliqué -> {len(df):,} IRIS harmonisés")
+        if year != TARGET_YEAR:
+            cw = load_iris_crosswalk(source_year=year,
+                                      target_year=TARGET_YEAR,
+                                      dep_codes=DEPS_GRAND_PARIS)
+            if cw is not None and len(cw):
+                n_before = len(df)
+                df = apply_crosswalk_wide(df, cw, iris_col="IRIS")
+                print(f"     crosswalk {year}→{TARGET_YEAR} : "
+                      f"{len(cw):,} mappings appliqués ({n_before} → "
+                      f"{len(df)} IRIS)")
+            else:
+                print(f"     [..] pas de crosswalk pour {year} — "
+                      f"zonage natif conservé")
 
         # Sauvegarde wide en interim pour inspection
         wide_path = DATA_INTERIM / f"iris_wide_{year}.parquet"

@@ -13,6 +13,8 @@ import pandas as pd
 from .config import (
     DATA_RAW,
     LONG_SERIES_YEARS,
+    MIN_POP_ACTIVE,
+    NON_RESIDENTIAL_KEYWORDS,
     QUARTIERS_PARIS,
     QUARTIER_YEARS,
 )
@@ -24,6 +26,24 @@ from .fetch import (
 from .indicators import compute_income_indicators, compute_indicators
 from .io import col_find, read_tabular
 from .schemas import CSP_KEYS, csp_long_vars, csp_vars, filosofi_vars
+
+
+# ---------------------------------------------------------------------------
+# Filtrage IRIS non-résidentiels (bois, cimetières, grands équipements)
+# ---------------------------------------------------------------------------
+def _non_residential_mask(out: pd.DataFrame) -> pd.Series:
+    """Identifie les IRIS à écarter : pop < seuil OU libellé correspondant.
+
+    Cf. config.MIN_POP_ACTIVE et config.NON_RESIDENTIAL_KEYWORDS.
+    """
+    mask = pd.Series(False, index=out.index)
+    if "pop15p" in out.columns:
+        mask |= pd.to_numeric(out["pop15p"], errors="coerce").fillna(0) < MIN_POP_ACTIVE
+    if "LIBIRIS" in out.columns:
+        lib_u = out["LIBIRIS"].astype(str).str.upper()
+        for kw in NON_RESIDENTIAL_KEYWORDS:
+            mask |= lib_u.str.contains(kw, na=False, regex=False)
+    return mask
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +109,17 @@ def load_iris(path: Path, year: int, dep_codes: list[str]) -> pd.DataFrame | Non
         out["pop15p"] = out[avail].sum(axis=1) if avail else 0
 
     out = compute_indicators(out)
+
+    nr_mask = _non_residential_mask(out)
+    out["non_residential"] = nr_mask
+    if nr_mask.any():
+        cols_to_mask = [c for c in ("pct_cpis", "pct_classes_pop",
+                                     "pct_prof_inter", "ratio_gentrif")
+                        if c in out.columns]
+        out.loc[nr_mask, cols_to_mask] = np.nan
+        print(f"     {int(nr_mask.sum())} IRIS non-résidentiels masqués "
+              f"(pop<{MIN_POP_ACTIVE} ou libellé bois/cimetière/équipement)")
+
     out["year"] = year
     print(f"     CPIS={out['pct_cpis'].mean():.1f}%  "
           f"Ouv+Empl={out['pct_classes_pop'].mean():.1f}%")
@@ -215,17 +246,45 @@ def load_commune_contours_gdf(dep_codes: list[str]) -> gpd.GeoDataFrame | None:
     for drop_col in ("year", "YEAR"):
         if drop_col in gdf.columns:
             gdf = gdf.drop(columns=drop_col)
+
+    def _clean_com(raw) -> str:
+        import re
+        if isinstance(raw, list) and raw:
+            raw = raw[0]
+        m = re.search(r"\d{5}", str(raw))
+        return m.group(0) if m else str(raw).strip()
+
     for c in ("com_code", "codgeo", "CODGEO", "insee_com"):
         if c in gdf.columns:
-            gdf["CODGEO"] = gdf[c].astype(str)
+            gdf["CODGEO"] = gdf[c].map(_clean_com)
             break
     if "CODGEO" not in gdf.columns:
         for c in gdf.columns:
             if gdf[c].dtype == object:
-                vals = gdf[c].astype(str)
+                vals = gdf[c].map(_clean_com)
                 if vals.str.match(r"^\d{5}$").sum() > 10:
                     gdf["CODGEO"] = vals
                     break
+
+    # Paris apparaît comme une commune unique (75056) dans ce fichier ;
+    # les données INSEE longues utilisent les 20 codes d'arrondissement
+    # (75101-75120). On complète à partir des contours IRIS dissous par
+    # les 5 premiers chiffres de IRIS (= COM de l'arrondissement).
+    if "75" in dep_codes and (gdf["CODGEO"] == "75056").any():
+        iris_gdf = load_iris_contours_gdf(["75"])
+        if iris_gdf is not None and "IRIS" in iris_gdf.columns:
+            iris_gdf = iris_gdf.copy()
+            iris_gdf["CODGEO"] = iris_gdf["IRIS"].astype(str).str[:5]
+            arr = iris_gdf[iris_gdf["CODGEO"].str.startswith("751")]
+            arr = arr[["CODGEO", "geometry"]].dissolve(by="CODGEO").reset_index()
+            if len(arr):
+                target_crs = arr.crs or gdf.crs
+                gdf = gdf[gdf["CODGEO"] != "75056"]
+                gdf = pd.concat([gdf[["CODGEO", "geometry"]], arr],
+                                ignore_index=True)
+                gdf = gpd.GeoDataFrame(gdf, geometry="geometry",
+                                       crs=target_crs)
+
     return gdf
 
 
@@ -258,67 +317,87 @@ def load_quartier_contours_gdf() -> gpd.GeoDataFrame | None:
 # ---------------------------------------------------------------------------
 def load_long_series(path: Path, dep_codes: list[str]) -> pd.DataFrame:
     """
-    Charge la base des séries harmonisées INSEE (communes, 1968-2022),
-    filtre par départements, et retourne un DataFrame en format long
-    avec `ratio_gentrif` calculé sur les actifs 25-54 ans pour chaque
-    millésime disponible.
+    Charge les séries harmonisées INSEE "Population active 25-54 ans par
+    CSP" (fichier `pop-act2554-csp-cd-*.xlsx`, page 1893185).
 
-    Returns
-    -------
-    pd.DataFrame aux colonnes : year, CODGEO, LIBGEO, DEP, cpis,
-        prof_inter, employes, ouvriers, pop_act, pct_cpis,
-        pct_classes_pop, ratio_gentrif.
+    Structure attendue : une feuille par (niveau, année), nommée
+    `COM_{year}` pour le niveau communal. En-tête multi-lignes :
+    - ligne 12 : numéro de CS (1..8)
+    - ligne 13 : TYPE_ACTIVITE (1 = actif ayant un emploi, 2 = chômeur)
+    - ligne 14 : libellé français
+    - ligne 15 : codes courts (RR, DR, CR, STABLE, DR24, LIBELLE, CSx_y…)
+    - ligne 16+ : données
 
-    Les lignes d'années où aucune variable CSP n'est trouvée sont omises.
+    Le code commune à 5 chiffres est reconstruit depuis DR (département)
+    + CR (commune). Pour chaque CS, on somme TYPE_ACTIVITE 1 et 2.
     """
-    df = read_tabular(path)
-    if df is None:
+    if path.suffix not in (".xls", ".xlsx"):
         return pd.DataFrame()
 
-    codgeo_c = col_find(df, "CODGEO") or col_find(df, "COM")
-    libgeo_c = col_find(df, "LIBGEO") or col_find(df, "LIBCOM")
-    if not codgeo_c:
-        return pd.DataFrame()
-
-    df[codgeo_c] = df[codgeo_c].astype(str).str.strip()
-    df = df[df[codgeo_c].str[:2].isin(dep_codes)]
-    if len(df) == 0:
+    try:
+        xl = pd.ExcelFile(path)
+    except Exception:
         return pd.DataFrame()
 
     rows = []
     for year in LONG_SERIES_YEARS:
-        vm = csp_long_vars(year)
-        found = {}
-        for key, candidates in vm.items():
-            for c in candidates:
-                if c in df.columns:
-                    found[key] = c
-                    break
-        if "cpis" not in found or not any(k in found for k in ("employes", "ouvriers")):
+        sheet = f"COM_{year}"
+        if sheet not in xl.sheet_names:
             continue
 
-        year_df = pd.DataFrame({
-            "CODGEO": df[codgeo_c].values,
-            "LIBGEO": df[libgeo_c].values if libgeo_c else "",
-            "DEP": df[codgeo_c].str[:2].values,
+        # Lecture brute pour extraire les headers multi-lignes
+        raw = pd.read_excel(path, sheet_name=sheet, header=None)
+        cs_row = raw.iloc[12].tolist()      # numéro de CS
+        type_row = raw.iloc[13].tolist()    # type d'activité
+        code_row = raw.iloc[15].tolist()    # codes courts
+        data = raw.iloc[16:].copy()
+        data.columns = range(data.shape[1])
+
+        # Localiser les colonnes d'identification
+        idx = {code: i for i, code in enumerate(code_row) if pd.notna(code)}
+        dr_i = idx.get("DR"); cr_i = idx.get("CR"); lib_i = idx.get("LIBELLE")
+        if dr_i is None or cr_i is None:
+            continue
+
+        df_year = pd.DataFrame({
+            "DR": data[dr_i].astype(str).str.strip(),
+            "CR": data[cr_i].astype(str).str.strip(),
         })
-        for key in ("cpis", "prof_inter", "employes", "ouvriers", "pop_act"):
-            if key in found:
-                year_df[key] = pd.to_numeric(df[found[key]],
-                                             errors="coerce").fillna(0).values
-            else:
-                year_df[key] = 0.0
-        # pop15p pour réutiliser compute_indicators (univers = actifs ici)
-        year_df["pop15p"] = (year_df["pop_act"]
-                             if year_df["pop_act"].sum() > 0
-                             else year_df[["cpis", "prof_inter",
-                                           "employes", "ouvriers"]].sum(axis=1))
-        year_df = compute_indicators(year_df)
-        year_df["year"] = year
-        rows.append(year_df)
-        print(f"  -> {year}: {len(year_df)} communes "
+        df_year["CODGEO"] = df_year["DR"].str.zfill(2) + df_year["CR"].str.zfill(3)
+        df_year["DEP"] = df_year["CODGEO"].str[:2]
+        df_year["LIBGEO"] = (data[lib_i].astype(str).values
+                             if lib_i is not None else "")
+        df_year = df_year[df_year["DEP"].isin(dep_codes)].copy()
+        if len(df_year) == 0:
+            continue
+
+        # Agrégation CSP : somme TYPE 1 + TYPE 2 par CS
+        cs_to_key = {3: "cpis", 4: "prof_inter", 5: "employes", 6: "ouvriers"}
+        for cs_num, key in cs_to_key.items():
+            cols = [i for i in range(len(cs_row))
+                    if str(cs_row[i]).strip() in (str(cs_num), f"{cs_num}.0")]
+            if not cols:
+                df_year[key] = 0.0
+                continue
+            values = data[cols].apply(pd.to_numeric, errors="coerce").fillna(0)
+            df_year[key] = values.sum(axis=1).loc[df_year.index].values
+
+        df_year["pop_act"] = df_year[["cpis", "prof_inter",
+                                       "employes", "ouvriers"]].sum(axis=1)
+        df_year["pop15p"] = df_year["pop_act"]
+        df_year = compute_indicators(df_year)
+        df_year["year"] = year
+        df_year = df_year[df_year["pop_act"] > 0]
+
+        rows.append(df_year[["year", "CODGEO", "DEP", "LIBGEO", "cpis",
+                             "prof_inter", "employes", "ouvriers",
+                             "pop_act", "pop15p", "pct_cpis",
+                             "pct_classes_pop", "pct_prof_inter",
+                             "ratio_gentrif"]])
+        print(f"  -> {year}: {len(df_year)} communes "
               f"dép.{','.join(dep_codes)} "
-              f"CPIS={year_df['pct_cpis'].mean():.1f}%")
+              f"CPIS={df_year['pct_cpis'].mean():.1f}% "
+              f"ratio={df_year['ratio_gentrif'].mean():.2f}")
 
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 

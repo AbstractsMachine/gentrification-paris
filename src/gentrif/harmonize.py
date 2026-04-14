@@ -82,21 +82,32 @@ CROSSWALK_COLS = ("iris_src", "iris_dst", "weight")
 
 def _normalise_crosswalk_cols(df: pd.DataFrame) -> pd.DataFrame | None:
     """Accepte plusieurs conventions de nommage et normalise vers
-    (iris_src, iris_dst, weight) + éventuellement (year_src, year_dst)."""
+    (iris_src, iris_dst, weight, [year_src, year_dst])."""
     mapping = {}
-    for src_candidate in ("iris_src", "IRIS_SRC", "iris_old", "CODE_IRIS_1",
-                          "DCOMIRIS_ANC", "iris_from"):
+    for src_candidate in ("iris_src", "IRIS_SRC", "iris_old", "IRIS_1",
+                          "CODE_IRIS_1", "DCOMIRIS_ANC", "iris_from"):
         if src_candidate in df.columns:
             mapping[src_candidate] = "iris_src"
             break
-    for dst_candidate in ("iris_dst", "IRIS_DST", "iris_new", "CODE_IRIS_2",
-                          "DCOMIRIS", "iris_to"):
+    for dst_candidate in ("iris_dst", "IRIS_DST", "iris_new", "IRIS_2",
+                          "CODE_IRIS_2", "DCOMIRIS", "iris_to"):
         if dst_candidate in df.columns:
             mapping[dst_candidate] = "iris_dst"
             break
-    for w_candidate in ("weight", "WEIGHT", "poids", "share", "prop"):
+    # Chabriel : `iris1_in_iris2_ajuste` = part de l'IRIS source dans
+    # l'IRIS cible, ajustée — c'est exactement le poids d'agrégation.
+    for w_candidate in ("weight", "WEIGHT", "poids", "share", "prop",
+                        "iris1_in_iris2_ajuste", "iris1_in_iris2"):
         if w_candidate in df.columns:
             mapping[w_candidate] = "weight"
+            break
+    for ys_candidate in ("year_src", "year_1", "YEAR_SRC", "annee_1"):
+        if ys_candidate in df.columns:
+            mapping[ys_candidate] = "year_src"
+            break
+    for yd_candidate in ("year_dst", "year_2", "YEAR_DST", "annee_2"):
+        if yd_candidate in df.columns:
+            mapping[yd_candidate] = "year_dst"
             break
 
     if not {"iris_src", "iris_dst"}.issubset(set(mapping.values())):
@@ -108,40 +119,137 @@ def _normalise_crosswalk_cols(df: pd.DataFrame) -> pd.DataFrame | None:
     for c in ("iris_src", "iris_dst"):
         out[c] = out[c].astype(str).str.strip()
     out["weight"] = pd.to_numeric(out["weight"], errors="coerce").fillna(1.0)
-    return out[[*CROSSWALK_COLS, *[c for c in ("year_src", "year_dst")
-                                   if c in out.columns]]]
+    cols = list(CROSSWALK_COLS) + [c for c in ("year_src", "year_dst")
+                                    if c in out.columns]
+    return out[cols]
 
 
-def load_iris_crosswalk() -> pd.DataFrame | None:
+def load_iris_crosswalk(source_year: int | None = None,
+                        target_year: int | None = None,
+                        dep_codes: list[str] | None = None,
+                        ) -> pd.DataFrame | None:
     """
     Charge la table de passage IRIS inter-millésimes depuis
-    `data/raw/iris_crosswalk.csv` (déposé manuellement ou via
-    `fetch.fetch_iris_crosswalk()`).
+    `data/raw/iris_crosswalk.csv` (Zenodo / Chabriel 2024, couvre 1999-2023).
 
-    Schéma normalisé en sortie : colonnes `iris_src`, `iris_dst`, `weight`
-    (plus éventuellement `year_src`, `year_dst`). `weight` représente la
-    part de l'IRIS source qui contribue à l'IRIS cible — utile pour une
-    agrégation pondérée des effectifs quand un IRIS est scindé.
+    Lecture par chunks pour gérer les fichiers volumineux (~700 Mo France
+    entière). Filtrage à la lecture sur :
+    - `source_year`/`target_year` — le mapping est récupéré dans les deux
+      directions (Chabriel ne stocke que `year_src > year_dst`) et
+      normalisé en sens forward (source → target) ;
+    - préfixes de département (`dep_codes`) appliqués aux codes IRIS.
 
-    Le loader tolère les conventions de nommage variables (Zenodo a publié
-    plusieurs versions).
+    Semantique des poids Chabriel :
+    - `iris1_in_iris2_ajuste` = part de l'aire de IRIS_1 dans IRIS_2
+    - `iris2_in_iris1_ajuste` = part de l'aire de IRIS_2 dans IRIS_1
+    Pour agréger des effectifs source → target, on prend le poids qui
+    représente la part du polygone **source** qui tombe dans le polygone
+    **target** (« quelle fraction du source est incluse dans le target »).
+
+    Schéma de sortie : `(iris_src, iris_dst, weight, year_src, year_dst)`
+    avec `year_src = source_year`, `year_dst = target_year`.
     """
-    from .config import DATA_RAW, IRIS_CROSSWALK_FILENAME
+    from .config import DATA_INTERIM, DATA_RAW, IRIS_CROSSWALK_FILENAME
 
     path = DATA_RAW / IRIS_CROSSWALK_FILENAME
     if not path.exists():
         return None
 
-    for sep in (",", ";", "\t"):
+    cache_key = f"{source_year or 'all'}_{target_year or 'all'}_" \
+                f"{'-'.join(sorted(dep_codes)) if dep_codes else 'all'}"
+    cache_path = DATA_INTERIM / f"iris_crosswalk_{cache_key}.parquet"
+    if cache_path.exists():
+        return pd.read_parquet(cache_path)
+
+    # Sondage pour détecter format Chabriel vs format générique.
+    probe = None
+    sep = None
+    for candidate in (";", ",", "\t"):
         try:
-            df = pd.read_csv(path, sep=sep, encoding="utf-8", dtype=str)
-            if df.shape[1] >= 3:
-                normalised = _normalise_crosswalk_cols(df)
-                if normalised is not None:
-                    return normalised
+            p = pd.read_csv(path, sep=candidate, dtype=str, nrows=5)
+            if p.shape[1] >= 3:
+                probe = p
+                sep = candidate
+                break
         except Exception:
             continue
-    return None
+    if probe is None:
+        return None
+
+    is_chabriel = {"IRIS_1", "IRIS_2", "year_1", "year_2",
+                   "iris1_in_iris2_ajuste",
+                   "iris2_in_iris1_ajuste"}.issubset(set(probe.columns))
+
+    dep_prefixes = tuple(dep_codes) if dep_codes else None
+    kept: list[pd.DataFrame] = []
+
+    if is_chabriel and source_year is not None and target_year is not None:
+        src, tgt = str(source_year), str(target_year)
+        use_cols = ["IRIS_1", "IRIS_2", "year_1", "year_2",
+                    "iris1_in_iris2_ajuste", "iris2_in_iris1_ajuste"]
+        reader = pd.read_csv(path, sep=sep, dtype=str, chunksize=500_000,
+                             encoding="utf-8", usecols=use_cols)
+        for chunk in reader:
+            # Forward : year_1=src, year_2=tgt (rare — Chabriel ne stocke
+            # que year_1 > year_2).
+            fwd = chunk[(chunk["year_1"] == src) & (chunk["year_2"] == tgt)]
+            if len(fwd):
+                out = pd.DataFrame({
+                    "iris_src": fwd["IRIS_1"],
+                    "iris_dst": fwd["IRIS_2"],
+                    "weight": pd.to_numeric(fwd["iris1_in_iris2_ajuste"],
+                                            errors="coerce"),
+                })
+                if dep_prefixes:
+                    out = out[out["iris_src"].str.startswith(dep_prefixes)]
+                if len(out):
+                    out["year_src"] = source_year
+                    out["year_dst"] = target_year
+                    kept.append(out)
+            # Reverse : year_1=tgt, year_2=src → on inverse, poids =
+            # iris2_in_iris1 (part du *src* dans le *tgt*).
+            rev = chunk[(chunk["year_1"] == tgt) & (chunk["year_2"] == src)]
+            if len(rev):
+                out = pd.DataFrame({
+                    "iris_src": rev["IRIS_2"],
+                    "iris_dst": rev["IRIS_1"],
+                    "weight": pd.to_numeric(rev["iris2_in_iris1_ajuste"],
+                                            errors="coerce"),
+                })
+                if dep_prefixes:
+                    out = out[out["iris_src"].str.startswith(dep_prefixes)]
+                if len(out):
+                    out["year_src"] = source_year
+                    out["year_dst"] = target_year
+                    kept.append(out)
+    else:
+        # Format générique via _normalise_crosswalk_cols
+        reader = pd.read_csv(path, sep=sep, dtype=str, chunksize=500_000,
+                             encoding="utf-8")
+        for chunk in reader:
+            norm = _normalise_crosswalk_cols(chunk)
+            if norm is None:
+                continue
+            if source_year is not None and "year_src" in norm.columns:
+                norm = norm[pd.to_numeric(norm["year_src"],
+                                           errors="coerce") == source_year]
+            if target_year is not None and "year_dst" in norm.columns:
+                norm = norm[pd.to_numeric(norm["year_dst"],
+                                           errors="coerce") == target_year]
+            if dep_prefixes:
+                norm = norm[norm["iris_src"].str.startswith(dep_prefixes)]
+            if len(norm):
+                kept.append(norm)
+
+    if not kept:
+        return None
+    out = pd.concat(kept, ignore_index=True)
+    out["weight"] = out["weight"].fillna(0.0)
+    try:
+        out.to_parquet(cache_path, index=False)
+    except Exception:
+        pass
+    return out
 
 
 def apply_crosswalk_wide(df_wide: pd.DataFrame,
@@ -187,6 +295,16 @@ def apply_crosswalk_wide(df_wide: pd.DataFrame,
 
     agg = merged.groupby("iris_dst", as_index=False)[count_cols].sum()
     agg = agg.rename(columns={"iris_dst": iris_col})
+    # Re-dérive les colonnes géographiques depuis le code IRIS cible :
+    # IRIS à 9 chiffres = DEP(2) + COM(3) + reste(4). Pour Paris, COM
+    # correspond aux arrondissements (75101..75120).
+    if iris_col in agg.columns:
+        codes = agg[iris_col].astype(str)
+        agg["DEP"] = codes.str[:2]
+        agg["COM"] = codes.str[:5]
+        agg["ARRDT"] = agg["COM"].apply(
+            lambda c: int(c[-2:]) if c.startswith("751") else 0
+        )
     if "year" in df_wide.columns:
         agg["year"] = df_wide["year"].iloc[0]
     return compute_indicators(agg)
