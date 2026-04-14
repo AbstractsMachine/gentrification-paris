@@ -124,19 +124,22 @@ def load_iris_contours_gdf(dep_codes: list[str]) -> gpd.GeoDataFrame | None:
 
 
 def load_quartier_contours_gdf() -> gpd.GeoDataFrame | None:
+    """Contours des 80 quartiers administratifs de Paris (opendata.paris.fr).
+
+    Le champ `c_qu` contient le numéro officiel du quartier (1 à 80) ;
+    on le copie dans `num_quartier` pour compatibilité avec le reste du
+    pipeline.
+    """
     path = fetch_quartier_contours()
     if path is None:
         return None
     gdf = gpd.read_file(path)
-    for c in gdf.columns:
-        if gdf[c].dtype in [object, "int64", "float64"]:
-            try:
-                vals = pd.to_numeric(gdf[c], errors="coerce")
-                if vals.between(1, 80).sum() >= 60:
-                    gdf["num_quartier"] = vals.astype(int)
-                    break
-            except Exception:
-                pass
+    for c in ("c_qu", "num_quartier"):
+        if c in gdf.columns:
+            vals = pd.to_numeric(gdf[c], errors="coerce")
+            if vals.between(1, 80).sum() >= 60:
+                gdf["num_quartier"] = vals.fillna(0).astype(int)
+                break
     for c in gdf.columns:
         if "c_ar" in c.lower() or "arrond" in c.lower():
             gdf["arrondissement"] = pd.to_numeric(gdf[c], errors="coerce")

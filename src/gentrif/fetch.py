@@ -60,27 +60,41 @@ def fetch_iris_year(year: int) -> Path | None:
     if not pid:
         return None
 
-    # 2. Téléchargement via URLs INSEE standardisées
+    # 2. Téléchargement via URLs INSEE.
+    # Les millésimes anciens (2007, 2012) ne suivent pas la convention
+    # `base-ic-{pop|evol-struct-pop}-{year}` des millésimes récents.
+    SPECIAL_URLS = {
+        2007: f"https://www.insee.fr/fr/statistiques/fichier/{pid}/BTX_IC_POP_2007.zip",
+        2012: f"https://www.insee.fr/fr/statistiques/fichier/{pid}/infra-population-2012.zip",
+    }
+    urls_to_try: list[str] = []
+    if year in SPECIAL_URLS:
+        urls_to_try.append(SPECIAL_URLS[year])
     for base in [f"base-ic-pop-{year}", f"base-ic-evol-struct-pop-{year}"]:
         for ext in ["_csv.zip", ".zip", "_xlsx.zip"]:
-            url = f"https://www.insee.fr/fr/statistiques/fichier/{pid}/{base}{ext}"
-            zp = DATA_RAW / f"iris_{year}.zip"
-            try:
-                r = requests.get(url, timeout=120)
-                if r.status_code == 200 and len(r.content) > 10_000:
-                    zp.write_bytes(r.content)
-                    with zipfile.ZipFile(zp) as zf:
-                        candidates = sorted(
-                            [n for n in zf.namelist() if n.endswith((".csv", ".xls", ".xlsx"))],
-                            key=lambda n: zf.getinfo(n).file_size, reverse=True,
-                        )
-                        if candidates:
-                            zf.extract(candidates[0], DATA_RAW)
-                            out = DATA_RAW / candidates[0]
-                            print(f"  [ok] IRIS {year}: extrait {candidates[0]}")
-                            return out
-            except Exception:
-                continue
+            urls_to_try.append(
+                f"https://www.insee.fr/fr/statistiques/fichier/{pid}/{base}{ext}"
+            )
+
+    for url in urls_to_try:
+        zp = DATA_RAW / f"iris_{year}.zip"
+        try:
+            r = requests.get(url, timeout=180)
+            if r.status_code == 200 and len(r.content) > 10_000:
+                zp.write_bytes(r.content)
+                with zipfile.ZipFile(zp) as zf:
+                    candidates = sorted(
+                        [n for n in zf.namelist() if n.endswith((".csv", ".xls", ".xlsx"))],
+                        key=lambda n: zf.getinfo(n).file_size, reverse=True,
+                    )
+                    if candidates:
+                        zf.extract(candidates[0], DATA_RAW)
+                        out = DATA_RAW / candidates[0]
+                        print(f"  [ok] IRIS {year}: extrait {candidates[0]}")
+                        return out
+        except Exception as e:
+            print(f"  [..] {year} {url.split('/')[-1]}: {e.__class__.__name__}")
+            continue
     return None
 
 
