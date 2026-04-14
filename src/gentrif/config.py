@@ -33,8 +33,9 @@ DEPS_PETITE_COURONNE: list[str] = ["92", "93", "94"]
 DEPS_GRAND_PARIS: list[str] = DEPS_PARIS + DEPS_PETITE_COURONNE
 
 SCOPES: dict[str, tuple[list[str], str]] = {
-    "paris":       (DEPS_PARIS,       "Paris intra-muros"),
-    "grand_paris": (DEPS_GRAND_PARIS, "Paris + petite couronne"),
+    "paris":            (DEPS_PARIS,            "Paris intra-muros"),
+    "petite_couronne":  (DEPS_PETITE_COURONNE,  "Petite couronne (92-93-94)"),
+    "grand_paris":      (DEPS_GRAND_PARIS,      "Paris + petite couronne"),
 }
 
 # -- Millésimes IRIS cibles (recensement rénové, espacement 5 ans)
@@ -43,6 +44,9 @@ IRIS_YEARS: list[int] = [2007, 2012, 2017, 2022]
 # -- Millésimes quartier (période Clerval, données APUR)
 QUARTIER_YEARS: list[int] = [1982, 1990, 1999]
 
+# -- Millésimes FiLoSoFi IRIS (revenus fiscaux disponibles, dispos dès 2012)
+FILOSOFI_YEARS: list[int] = [2012, 2017, 2021]
+
 # -- Identifiants INSEE des pages de téléchargement par millésime IRIS
 INSEE_PAGES: dict[int, str] = {
     2007: "2028650",
@@ -50,6 +54,34 @@ INSEE_PAGES: dict[int, str] = {
     2017: "4799309",
     2022: "8647014",
 }
+
+# -- Identifiants INSEE des pages FiLoSoFi IRIS par millésime (à compléter
+# au premier fetch ; cf. data/raw/MANIFEST.md §FiLoSoFi).
+INSEE_PAGES_FILOSOFI: dict[int, str] = {
+    2012: "",   # TODO
+    2017: "",   # TODO
+    2021: "",   # TODO
+}
+
+# -- Table de passage IRIS inter-millésimes (Zenodo, cf. METHODOLOGY §4.4)
+# La DOI canonique est à renseigner dans MANIFEST.md et à aller chercher.
+# Le fichier attendu dans data/raw/ est `iris_crosswalk.csv`, format :
+#   (iris_src, iris_dst, year_src, year_dst, weight)
+IRIS_CROSSWALK_URL: str = (
+    # URL de téléchargement direct à confirmer en fonction de la version Zenodo.
+    # Exemple : "https://zenodo.org/records/XXXXXXX/files/iris_crosswalk.csv"
+    ""
+)
+IRIS_CROSSWALK_FILENAME: str = "iris_crosswalk.csv"
+
+# -- Millésimes pour la tendance longue commune/arrondissement 1968-2022
+# (séries harmonisées INSEE, page 1893185). Points de recensement successifs ;
+# les actifs 25-54 ans sont l'univers commun de référence.
+LONG_SERIES_YEARS: list[int] = [1968, 1975, 1982, 1990, 1999, 2006, 2011, 2016, 2021]
+
+# -- Page INSEE des séries harmonisées longues (communes France entière)
+INSEE_PAGE_LONG_SERIES: str = "1893185"
+LONG_SERIES_FILENAME: str = "base-cc-serie-historique.xlsx"
 
 # -- 80 quartiers administratifs de Paris, nomenclature APUR
 # (numéro officiel, nom, arrondissement)
@@ -76,14 +108,27 @@ QUARTIERS_PARIS: dict[int, list[tuple[int, str]]] = {
     20: [(77, "Belleville"), (78, "St-Fargeau"), (79, "Père-Lachaise"), (80, "Charonne")],
 }
 
-# -- Catégories de synthèse pour la typologie type Clerval (cf. Fig. 6, 2010)
-# Quantiles appliqués sur `ratio_gentrif` (CPIS / classes populaires)
-SYNTHESIS_CATEGORIES: list[tuple[str, float, float, str]] = [
+# -- Typologie en niveau (géographie sociale à une date donnée)
+# Quantiles appliqués sur `ratio_gentrif` (CPIS / classes populaires).
+# Attention : cette classification décrit un *état* social, pas un *processus*.
+# Pour caractériser la gentrification, utiliser TRAJECTORY_CATEGORIES.
+LEVEL_CATEGORIES: list[tuple[str, float, float, str]] = [
     # (label, q_low, q_high, color)
-    ("Beaux quartiers",        0.95, 1.00, "#0c2340"),
-    ("Gentrification achevée", 0.80, 0.95, "#1a5276"),
-    ("Gentrification avancée", 0.60, 0.80, "#2e86c1"),
-    ("Gentrification en cours",0.40, 0.60, "#85c1e9"),
-    ("En transition",          0.20, 0.40, "#d5f5e3"),
-    ("Quartiers populaires",   0.00, 0.20, "#e74c3c"),
+    ("Beaux quartiers",         0.95, 1.00, "#0c2340"),
+    ("Quartiers aisés",         0.80, 0.95, "#1a5276"),
+    ("Mixité supérieure",       0.60, 0.80, "#2e86c1"),
+    ("Mixité intermédiaire",    0.40, 0.60, "#85c1e9"),
+    ("Mixité populaire",        0.20, 0.40, "#d5f5e3"),
+    ("Quartiers populaires",    0.00, 0.20, "#e74c3c"),
+]
+
+# -- Typologie en trajectoire 2×2 (niveau initial × évolution)
+# Appliquée à (ratio_t0, ratio_t1). Seule à caractériser un processus de
+# gentrification (substitution sociale dans le temps). Cf. METHODOLOGY.md §2bis.
+TRAJECTORY_CATEGORIES: list[tuple[str, str]] = [
+    # (label, hex color)
+    ("Gentrification",           "#c0392b"),  # niveau bas → hausse
+    ("Relégation",               "#f39c12"),  # niveau bas → stagnation/baisse
+    ("Consolidation bourgeoise", "#1a5276"),  # niveau haut → hausse
+    ("Déclassement",             "#5dade2"),  # niveau haut → baisse
 ]

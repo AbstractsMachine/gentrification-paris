@@ -8,11 +8,20 @@ Voir data/raw/MANIFEST.md pour la liste exhaustive et la provenance.
 """
 from __future__ import annotations
 
-from gentrif.config import DEPS_GRAND_PARIS, DEPS_PARIS, IRIS_YEARS
+from gentrif.config import (
+    DEPS_GRAND_PARIS,
+    DEPS_PARIS,
+    FILOSOFI_YEARS,
+    IRIS_YEARS,
+)
 from gentrif.fetch import (
     fetch_apur_pdf,
+    fetch_commune_contours,
+    fetch_filosofi_year,
     fetch_iris_contours,
+    fetch_iris_crosswalk,
     fetch_iris_year,
+    fetch_long_series,
     fetch_quartier_contours,
 )
 
@@ -26,12 +35,25 @@ def main() -> None:
     for y in IRIS_YEARS:
         fetch_iris_year(y)
 
+    print("\n-- Bases FiLoSoFi IRIS (revenus)")
+    for y in FILOSOFI_YEARS:
+        fetch_filosofi_year(y)
+
     print("\n-- Contours IRIS")
     fetch_iris_contours(DEPS_PARIS)
     fetch_iris_contours(DEPS_GRAND_PARIS)
 
+    print("\n-- Contours communes (pour séries longues)")
+    fetch_commune_contours(DEPS_GRAND_PARIS)
+
     print("\n-- Contours 80 quartiers (APUR / Paris opendata)")
     fetch_quartier_contours()
+
+    print("\n-- Séries harmonisées longues INSEE (1968-2022, communes)")
+    fetch_long_series()
+
+    print("\n-- Table de passage IRIS (Zenodo)")
+    fetch_iris_crosswalk()
 
     print("\n-- PDF APUR 1954-1999")
     fetch_apur_pdf()

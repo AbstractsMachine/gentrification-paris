@@ -1,5 +1,5 @@
 """
-Cartes de synthèse (typologie Clerval) et cartes historiques.
+Cartes de synthèse (typologie trajectoire 2×2 + niveau) et cartes historiques.
 """
 from __future__ import annotations
 
@@ -12,14 +12,38 @@ import numpy as np
 import pandas as pd
 from matplotlib.patches import Patch
 
-from ..config import SYNTHESIS_CATEGORIES
+from ..config import LEVEL_CATEGORIES, TRAJECTORY_CATEGORIES
+from ..indicators import classify_trajectory
 
 
-def plot_synthesis(gdf: gpd.GeoDataFrame, label: str, path: Path) -> None:
+def _annotate_arrondissements(ax, d: gpd.GeoDataFrame) -> None:
+    if "COM" not in d.columns:
+        return
+    try:
+        cm = d.dissolve(by="COM")
+        cm.boundary.plot(ax=ax, edgecolor="black", linewidth=0.8)
+        for idx, row in cm.iterrows():
+            c = row.geometry.centroid
+            s = str(idx)
+            if s.startswith("751"):
+                ax.annotate(
+                    f"{s[-2:].lstrip('0')}e", xy=(c.x, c.y),
+                    ha="center", va="center", fontsize=6,
+                    fontweight="bold", color="white",
+                    path_effects=[pe.withStroke(linewidth=2, foreground="black")],
+                )
+    except Exception:
+        pass
+
+
+def plot_level_typology(gdf: gpd.GeoDataFrame, label: str, path: Path) -> None:
     """
-    Carte de synthèse type Figure 6 de Clerval (2010) : classification des
-    unités spatiales en 6 stades de gentrification, par quantiles du
-    ratio_gentrif.
+    Carte de **géographie sociale** : classification en niveau du
+    `ratio_gentrif` à une date donnée, par quantiles empiriques.
+
+    Cette carte décrit un *état* (qui est riche, qui est pauvre), pas un
+    processus. Elle n'identifie pas les quartiers en cours de
+    gentrification — pour cela, utiliser `plot_trajectory`.
     """
     fig, ax = plt.subplots(1, 1, figsize=(16, 18))
     fig.patch.set_facecolor("white")
@@ -31,37 +55,96 @@ def plot_synthesis(gdf: gpd.GeoDataFrame, label: str, path: Path) -> None:
         return
 
     r = d["ratio_gentrif"]
-    for lbl, q_lo, q_hi, color in SYNTHESIS_CATEGORIES:
+    for lbl, q_lo, q_hi, color in LEVEL_CATEGORIES:
         lo = r.quantile(q_lo)
         hi = r.quantile(q_hi) if q_hi < 1 else np.inf
         sub = d[(r >= lo) & (r < hi)]
         if len(sub):
             sub.plot(ax=ax, color=color, edgecolor="white", linewidth=0.1)
 
-    if "COM" in d.columns:
-        try:
-            cm = d.dissolve(by="COM")
-            cm.boundary.plot(ax=ax, edgecolor="black", linewidth=0.8)
-            for idx, row in cm.iterrows():
-                c = row.geometry.centroid
-                s = str(idx)
-                if s.startswith("751"):
-                    ax.annotate(
-                        f"{s[-2:].lstrip('0')}e", xy=(c.x, c.y),
-                        ha="center", va="center", fontsize=6,
-                        fontweight="bold", color="white",
-                        path_effects=[pe.withStroke(linewidth=2, foreground="black")],
-                    )
-        except Exception:
-            pass
+    _annotate_arrondissements(ax, d)
 
     ax.legend(handles=[Patch(facecolor=c, edgecolor="gray", label=l)
-                       for l, _, _, c in SYNTHESIS_CATEGORIES],
-              loc="lower left", fontsize=8, title="Classification")
+                       for l, _, _, c in LEVEL_CATEGORIES],
+              loc="lower left", fontsize=8, title="Géographie sociale")
     ax.set_axis_off()
     y = d["year"].iloc[0] if "year" in d else "?"
-    ax.set_title(f"Synthèse gentrification — {label} ({y})",
+    ax.set_title(f"Géographie sociale (niveau) — {label} ({y})",
                  fontsize=13, fontweight="bold", pad=15)
+    fig.text(0.5, 0.01,
+             "Niveau du ratio CPIS / classes populaires — décrit un état, "
+             "pas un processus.",
+             ha="center", fontsize=7, color="gray", style="italic")
+    plt.savefig(path, dpi=200, bbox_inches="tight", facecolor="white")
+    plt.close()
+    print(f"    [map] {path.name}")
+
+
+def plot_trajectory(gdf_t0: gpd.GeoDataFrame,
+                    gdf_t1: gpd.GeoDataFrame,
+                    label: str,
+                    path: Path,
+                    key: str = "IRIS",
+                    level_quantile: float = 0.5,
+                    delta_threshold: float = 0.0) -> None:
+    """
+    Carte de **synthèse type Figure 6 de Clerval** : typologie 2×2 croisant
+    le niveau initial du `ratio_gentrif` (t0) avec son évolution (t0 → t1).
+
+    Seule carte qui caractérise véritablement le *processus* de
+    gentrification (cf. METHODOLOGY.md §2bis).
+    """
+    cols_needed = {key, "ratio_gentrif"}
+    if not cols_needed.issubset(gdf_t0.columns) or \
+       not cols_needed.issubset(gdf_t1.columns):
+        return
+
+    merged = gdf_t1[[key, "geometry", "ratio_gentrif"]].rename(
+        columns={"ratio_gentrif": "ratio_t1"}
+    ).merge(
+        gdf_t0[[key, "ratio_gentrif"]].rename(
+            columns={"ratio_gentrif": "ratio_t0"}),
+        on=key, how="inner",
+    )
+    if "COM" in gdf_t1.columns:
+        merged = merged.merge(gdf_t1[[key, "COM"]], on=key, how="left")
+    merged = gpd.GeoDataFrame(merged, geometry="geometry",
+                              crs=gdf_t1.crs)
+
+    merged["trajectory"] = classify_trajectory(
+        merged["ratio_t0"], merged["ratio_t1"],
+        level_quantile=level_quantile,
+        delta_threshold=delta_threshold,
+    )
+
+    fig, ax = plt.subplots(1, 1, figsize=(16, 18))
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("#f0f0f0")
+
+    na_mask = merged["trajectory"].isna()
+    if na_mask.any():
+        merged[na_mask].plot(ax=ax, color="lightgray",
+                             edgecolor="white", linewidth=0.1)
+    for lbl, color in TRAJECTORY_CATEGORIES:
+        sub = merged[merged["trajectory"] == lbl]
+        if len(sub):
+            sub.plot(ax=ax, color=color, edgecolor="white", linewidth=0.1)
+
+    _annotate_arrondissements(ax, merged)
+
+    y0 = gdf_t0["year"].iloc[0] if "year" in gdf_t0 else "t0"
+    y1 = gdf_t1["year"].iloc[0] if "year" in gdf_t1 else "t1"
+    ax.legend(handles=[Patch(facecolor=c, edgecolor="gray", label=l)
+                       for l, c in TRAJECTORY_CATEGORIES],
+              loc="lower left", fontsize=9,
+              title=f"Trajectoire {y0} → {y1}")
+    ax.set_axis_off()
+    ax.set_title(f"Trajectoires socio-spatiales — {label} ({y0} → {y1})",
+                 fontsize=13, fontweight="bold", pad=15)
+    fig.text(0.5, 0.01,
+             "Niveau initial (médiane à t0) × évolution du ratio CPIS / "
+             "classes populaires.",
+             ha="center", fontsize=7, color="gray", style="italic")
     plt.savefig(path, dpi=200, bbox_inches="tight", facecolor="white")
     plt.close()
     print(f"    [map] {path.name}")

@@ -76,4 +76,56 @@ INDICATORS: list[str] = [
     "pct_prof_inter",
     "ratio_gentrif",
     "pct_etr",
+    "med_uc",
+    "rel_med_uc",
+    "poverty_rate",
+    "gini",
+    "d9_d1",
 ]
+
+
+def csp_long_vars(year: int) -> dict[str, list[str]]:
+    """
+    Variables CSP dans les séries longues INSEE (commune, actifs
+    harmonisés 1968-2022, page INSEE 1893185). Les noms varient selon
+    les millésimes ; cette fonction retourne plusieurs candidats par clé.
+
+    Clés canoniques : cpis (CS3), prof_inter (CS4), employes (CS5),
+    ouvriers (CS6), pop_act (actifs totaux, univers de référence).
+    """
+    yy = f"{year % 100:02d}"
+    return dict(
+        cpis=[f"P{yy}_ACT_CS3", f"CS3_POP{yy}", f"C{yy}_ACT_CS3",
+              f"CS3_ACT{yy}"],
+        prof_inter=[f"P{yy}_ACT_CS4", f"CS4_POP{yy}", f"C{yy}_ACT_CS4",
+                    f"CS4_ACT{yy}"],
+        employes=[f"P{yy}_ACT_CS5", f"CS5_POP{yy}", f"C{yy}_ACT_CS5",
+                  f"CS5_ACT{yy}"],
+        ouvriers=[f"P{yy}_ACT_CS6", f"CS6_POP{yy}", f"C{yy}_ACT_CS6",
+                  f"CS6_ACT{yy}"],
+        pop_act=[f"P{yy}_ACT", f"ACT{yy}", f"P{yy}_POPACT"],
+    )
+
+
+def filosofi_vars(year: int) -> dict[str, list[str]]:
+    """
+    Variables canoniques FiLoSoFi IRIS (revenu fiscal disponible par UC) →
+    liste de noms INSEE candidats, par ordre de préférence. Le loader prend
+    la première colonne présente (les conventions varient entre millésimes).
+
+    Clés canoniques :
+        med_uc          — Médiane du niveau de vie (€ par UC)
+        d1              — 1er décile du niveau de vie
+        d9              — 9e décile du niveau de vie
+        poverty_rate    — Taux de pauvreté (seuil 60 % médiane nationale)
+        gini            — Indice de Gini
+    """
+    yy = f"{year % 100:02d}"
+    return dict(
+        med_uc=[f"DISP_MED{yy}", f"DEC_MED{yy}", f"DISP_Q2{yy}",
+                f"DISP_MED_{year}"],
+        d1=[f"DISP_D1{yy}", f"DEC_D1{yy}", f"DISP_D1_{year}"],
+        d9=[f"DISP_D9{yy}", f"DEC_D9{yy}", f"DISP_D9_{year}"],
+        poverty_rate=[f"DISP_TP60{yy}", f"TP60{yy}", f"DISP_TP60_{year}"],
+        gini=[f"DISP_GI{yy}", f"DEC_GI{yy}", f"DISP_GI_{year}"],
+    )

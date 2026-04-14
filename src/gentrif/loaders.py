@@ -10,11 +10,20 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from .config import DATA_RAW, QUARTIERS_PARIS, QUARTIER_YEARS
-from .fetch import fetch_iris_contours, fetch_quartier_contours
-from .indicators import compute_indicators
+from .config import (
+    DATA_RAW,
+    LONG_SERIES_YEARS,
+    QUARTIERS_PARIS,
+    QUARTIER_YEARS,
+)
+from .fetch import (
+    fetch_commune_contours,
+    fetch_iris_contours,
+    fetch_quartier_contours,
+)
+from .indicators import compute_income_indicators, compute_indicators
 from .io import col_find, read_tabular
-from .schemas import CSP_KEYS, csp_vars
+from .schemas import CSP_KEYS, csp_long_vars, csp_vars, filosofi_vars
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +96,69 @@ def load_iris(path: Path, year: int, dep_codes: list[str]) -> pd.DataFrame | Non
 
 
 # ---------------------------------------------------------------------------
+# IRIS — bases FiLoSoFi (revenus fiscaux disponibles par UC)
+# ---------------------------------------------------------------------------
+def load_filosofi_iris(path: Path, year: int,
+                       dep_codes: list[str]) -> pd.DataFrame | None:
+    """
+    Charge une base FiLoSoFi IRIS, filtre par départements, calcule les
+    indicateurs de revenus.
+
+    Colonnes garanties : IRIS, DEP, med_uc, d1, d9, poverty_rate, gini,
+    rel_med_uc, d9_d1, year. rel_med_uc est le rapport entre la médiane
+    de l'IRIS et la médiane du périmètre chargé (= centré sur 1.0).
+    """
+    df = read_tabular(path)
+    if df is None:
+        return None
+
+    iris_c = col_find(df, "IRIS")
+    if not iris_c:
+        return None
+    df[iris_c] = df[iris_c].astype(str).str.strip()
+    df = df[df[iris_c].str[:2].isin(dep_codes)]
+    if len(df) == 0:
+        return None
+
+    out = pd.DataFrame({"IRIS": df[iris_c].values})
+    out["DEP"] = out["IRIS"].str[:2]
+    com_c = col_find(df, "COM")
+    if com_c:
+        out["COM"] = df[com_c].astype(str).str.strip().values
+
+    vmap = filosofi_vars(year)
+    for key, candidates in vmap.items():
+        found = None
+        for c in candidates:
+            if c in df.columns:
+                found = c
+                break
+        if found is None:
+            for col in df.columns:
+                cu = col.upper().replace("-", "").replace("_", "")
+                if key == "med_uc" and "MED" in cu and str(year % 100) in cu:
+                    found = col; break
+                if key == "d1" and cu.endswith(f"D1{year%100:02d}"):
+                    found = col; break
+                if key == "d9" and cu.endswith(f"D9{year%100:02d}"):
+                    found = col; break
+                if key == "poverty_rate" and "TP60" in cu:
+                    found = col; break
+                if key == "gini" and ("GI" in cu and str(year % 100) in cu):
+                    found = col; break
+        out[key] = (pd.to_numeric(df[found], errors="coerce").values
+                    if found else np.nan)
+
+    out = compute_income_indicators(out)
+    out["year"] = year
+    if out["med_uc"].notna().any():
+        print(f"  -> {len(out)} IRIS FiLoSoFi {year} "
+              f"dép.{','.join(dep_codes)} | med_uc médian="
+              f"{out['med_uc'].median():.0f}€")
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Contours géographiques
 # ---------------------------------------------------------------------------
 def _clean_iris_code(raw) -> str:
@@ -106,6 +178,13 @@ def load_iris_contours_gdf(dep_codes: list[str]) -> gpd.GeoDataFrame | None:
         return None
     gdf = gpd.read_file(path)
 
+    # Les contours opendatasoft exposent une colonne `year` qui désigne
+    # le millésime du zonage — sans rapport avec l'année des données
+    # statistiques. On la retire pour éviter les collisions lors des merges.
+    for drop_col in ("year", "YEAR"):
+        if drop_col in gdf.columns:
+            gdf = gdf.drop(columns=drop_col)
+
     # Les contours opendatasoft stockent iris_code comme liste JSON
     # (["751135119"]). On normalise systématiquement.
     for c in ["iris_code", "CODE_IRIS", "code_iris", "DCOMIRIS"]:
@@ -120,6 +199,33 @@ def load_iris_contours_gdf(dep_codes: list[str]) -> gpd.GeoDataFrame | None:
             if candidate.str.match(r"^\d{9}$").sum() > 10:
                 gdf["IRIS"] = candidate
                 return gdf
+    return gdf
+
+
+def load_commune_contours_gdf(dep_codes: list[str]) -> gpd.GeoDataFrame | None:
+    """Contours GeoJSON des communes pour un périmètre départemental.
+
+    Paris apparaît comme une seule commune (75056) dans ce fichier ; les
+    20 arrondissements sont en fallback dans les contours IRIS (via COM).
+    """
+    path = fetch_commune_contours(dep_codes)
+    if path is None:
+        return None
+    gdf = gpd.read_file(path)
+    for drop_col in ("year", "YEAR"):
+        if drop_col in gdf.columns:
+            gdf = gdf.drop(columns=drop_col)
+    for c in ("com_code", "codgeo", "CODGEO", "insee_com"):
+        if c in gdf.columns:
+            gdf["CODGEO"] = gdf[c].astype(str)
+            break
+    if "CODGEO" not in gdf.columns:
+        for c in gdf.columns:
+            if gdf[c].dtype == object:
+                vals = gdf[c].astype(str)
+                if vals.str.match(r"^\d{5}$").sum() > 10:
+                    gdf["CODGEO"] = vals
+                    break
     return gdf
 
 
@@ -145,6 +251,76 @@ def load_quartier_contours_gdf() -> gpd.GeoDataFrame | None:
             gdf["arrondissement"] = pd.to_numeric(gdf[c], errors="coerce")
             break
     return gdf
+
+
+# ---------------------------------------------------------------------------
+# Séries longues INSEE — communes, 1968-2022 (page 1893185)
+# ---------------------------------------------------------------------------
+def load_long_series(path: Path, dep_codes: list[str]) -> pd.DataFrame:
+    """
+    Charge la base des séries harmonisées INSEE (communes, 1968-2022),
+    filtre par départements, et retourne un DataFrame en format long
+    avec `ratio_gentrif` calculé sur les actifs 25-54 ans pour chaque
+    millésime disponible.
+
+    Returns
+    -------
+    pd.DataFrame aux colonnes : year, CODGEO, LIBGEO, DEP, cpis,
+        prof_inter, employes, ouvriers, pop_act, pct_cpis,
+        pct_classes_pop, ratio_gentrif.
+
+    Les lignes d'années où aucune variable CSP n'est trouvée sont omises.
+    """
+    df = read_tabular(path)
+    if df is None:
+        return pd.DataFrame()
+
+    codgeo_c = col_find(df, "CODGEO") or col_find(df, "COM")
+    libgeo_c = col_find(df, "LIBGEO") or col_find(df, "LIBCOM")
+    if not codgeo_c:
+        return pd.DataFrame()
+
+    df[codgeo_c] = df[codgeo_c].astype(str).str.strip()
+    df = df[df[codgeo_c].str[:2].isin(dep_codes)]
+    if len(df) == 0:
+        return pd.DataFrame()
+
+    rows = []
+    for year in LONG_SERIES_YEARS:
+        vm = csp_long_vars(year)
+        found = {}
+        for key, candidates in vm.items():
+            for c in candidates:
+                if c in df.columns:
+                    found[key] = c
+                    break
+        if "cpis" not in found or not any(k in found for k in ("employes", "ouvriers")):
+            continue
+
+        year_df = pd.DataFrame({
+            "CODGEO": df[codgeo_c].values,
+            "LIBGEO": df[libgeo_c].values if libgeo_c else "",
+            "DEP": df[codgeo_c].str[:2].values,
+        })
+        for key in ("cpis", "prof_inter", "employes", "ouvriers", "pop_act"):
+            if key in found:
+                year_df[key] = pd.to_numeric(df[found[key]],
+                                             errors="coerce").fillna(0).values
+            else:
+                year_df[key] = 0.0
+        # pop15p pour réutiliser compute_indicators (univers = actifs ici)
+        year_df["pop15p"] = (year_df["pop_act"]
+                             if year_df["pop_act"].sum() > 0
+                             else year_df[["cpis", "prof_inter",
+                                           "employes", "ouvriers"]].sum(axis=1))
+        year_df = compute_indicators(year_df)
+        year_df["year"] = year
+        rows.append(year_df)
+        print(f"  -> {year}: {len(year_df)} communes "
+              f"dép.{','.join(dep_codes)} "
+              f"CPIS={year_df['pct_cpis'].mean():.1f}%")
+
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
 # ---------------------------------------------------------------------------

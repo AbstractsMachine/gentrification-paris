@@ -55,8 +55,51 @@ Ce rapport est privilégié sur la part brute des CPIS pour trois raisons :
   l'interprétation locale.
 - `pct_etr` (population étrangère), utilisé par Clerval comme révélateur
   de *pôles de résistance* à la gentrification.
-- Carte de synthèse : classification en 6 stades par quantiles du
-  `ratio_gentrif` (cf. `config.py::SYNTHESIS_CATEGORIES`).
+
+## 2bis. État vs processus : typologie trajectoire 2×2
+
+La gentrification désigne un **processus** de substitution sociale dans le
+temps, pas un **état** social à une date donnée. Cette distinction est
+cardinale pour l'interprétation cartographique : un niveau élevé du
+`ratio_gentrif` à une date donnée n'est pas un indicateur de
+gentrification. Neuilly-sur-Seine et le 16e arrondissement présentent un
+ratio très élevé depuis des décennies — ce sont des **beaux quartiers
+constitués**, pas des fronts pionniers en voie de gentrification.
+
+Deux classifications distinctes sont donc retenues :
+
+### Classification en niveau (`classify_level`, `plot_level_typology`)
+
+Répartition des unités spatiales à une **date donnée** en six classes de
+géographie sociale (quantiles du `ratio_gentrif`). Décrit un *état*. Utile
+pour localiser les beaux quartiers et les quartiers populaires, mais ne
+distingue pas un quartier historiquement aisé d'un quartier récemment
+gentrifié. Carte à placer en annexe.
+
+### Classification en trajectoire (`classify_trajectory`, `plot_trajectory`)
+
+Typologie 2×2 croisant le **niveau initial** (à t0) avec l'**évolution**
+du ratio entre t0 et t1 :
+
+| Niveau initial | Évolution | Classe                      |
+|----------------|-----------|-----------------------------|
+| bas            | hausse    | **Gentrification**          |
+| bas            | stable/baisse | **Relégation**           |
+| haut           | hausse    | **Consolidation bourgeoise**|
+| haut           | baisse    | **Déclassement**            |
+
+Le seuil de niveau par défaut est la médiane du `ratio_gentrif` à t0 sur
+le périmètre considéré ; le seuil de variation par défaut est 0 (toute
+hausse strictement positive classe en *hausse*). Ces paramètres sont
+exposés par la fonction pour permettre des analyses de sensibilité.
+
+Cette classification prolonge l'intuition de Clerval (2010, Fig. 6) —
+les *Beaux quartiers* y sont déjà traités comme un point de départ
+structurel, distinct du *front pionnier* qui désigne les quartiers
+basculant au cours de la période. Elle formalise mécaniquement ce que
+Clerval lisait qualitativement à partir des cartes successives.
+
+Carte de référence pour l'analyse de la gentrification dans le projet.
 
 ## 3. Organisation des données (raw / interim / processed)
 
@@ -116,18 +159,88 @@ les données harmonisées INSEE (1968-2022, communes) sont restreintes
 aux actifs 25-54 ans — un champ mobilisable pour une version *long-run*
 non encore implémentée (cf. §7).
 
-### 4.3. Zonages IRIS évolutifs
+### 4.3. Séries de revenus FiLoSoFi / RFL
+
+Le dispositif FiLoSoFi (*Fichier localisé social et fiscal*) remplace à
+partir de 2012 les RFL (*Revenus fiscaux localisés*, 2001-2012) et fournit
+par IRIS la médiane du niveau de vie, les déciles D1/D9, le taux de
+pauvreté (seuil 60 % de la médiane nationale) et l'indice de Gini.
+
+Ruptures identifiées :
+
+- **Rupture 2001-2012 → 2012+ (RFL → FiLoSoFi)** : changement d'univers
+  fiscal (passage du revenu fiscal déclaré au revenu disponible après
+  prestations et prélèvements), non strictement comparable. Ce projet
+  démarre les séries de revenus **à partir de 2012** pour éviter ce biais.
+- **Évolutions méthodologiques 2018-2019** : modification du traitement
+  des prestations sociales et des impôts (cf. notes méthodologiques
+  INSEE). Les séries FiLoSoFi 2012→2017 et 2019+ sont strictement
+  comparables entre elles, mais la comparaison exacte 2017→2019 demande
+  prudence.
+
+Métrique retenue : `rel_med_uc = med_uc(i) / médiane(med_uc, périmètre)`
+— revenu médian relatif au périmètre analysé. Par construction centré
+sur 1.0, ce qui absorbe l'inflation générale des revenus et isole le
+*positionnement social relatif* de l'IRIS. La **trajectoire 2×2** y
+s'applique directement (cf. §2bis) : seuil de niveau = médiane du rel_med_uc
+à t0, seuil d'évolution = 0.
+
+### 4.4. Zonages IRIS évolutifs
 
 Les codes IRIS sont révisés périodiquement (refontes 2008, 2015…). Une
 comparaison IRIS-à-IRIS 2007 vs 2022 est donc approximative pour les
 territoires redécoupés. Le dépôt Zenodo *"Harmonized INSEE
 socio-demographic IRIS-level data and IRIS conversion file (2010-2020)"*
-fournit une table de passage — son intégration est prévue
-(`harmonize.py::load_iris_crosswalk`).
+fournit une table de passage intégrée dans le pipeline :
 
-En l'état, l'essentiel des comparaisons se lit à l'**échelle du quartier
-perceptible** (grappe d'IRIS contigus), ce qui relativise l'impact des
-refontes ponctuelles.
+- Schéma attendu (normalisé par `harmonize._normalise_crosswalk_cols`) :
+  `(iris_src, iris_dst, weight)`, éventuellement `(year_src, year_dst)`.
+- Application : `apply_crosswalk_wide(df, crosswalk, count_cols=[...])`
+  agrège les effectifs bruts par IRIS cible avec pondération par `weight`,
+  puis recalcule les indicateurs via `compute_indicators`. Appliqué
+  automatiquement dans `scripts/build_processed.build_iris_long` quand
+  `data/raw/iris_crosswalk.csv` est présent.
+- Fallback identité : un IRIS non référencé dans le crosswalk est
+  conservé tel quel (`iris_src = iris_dst`, `weight = 1.0`).
+
+Les ratios et parts (`pct_*`, `ratio_gentrif`, `rel_med_uc`) ne sont **pas**
+additifs — ils sont toujours recalculés après agrégation pondérée des
+effectifs, jamais moyennés. Les analyses en format long gardent un pointeur
+`geo_code_harmonised` vers l'IRIS cible pour jointure cartographique, sans
+ré-agrégation.
+
+Sans crosswalk disponible, l'essentiel des comparaisons se lit à
+l'**échelle du quartier perceptible** (grappe d'IRIS contigus), ce qui
+relativise l'impact des refontes ponctuelles.
+
+### 4.5. Séries harmonisées INSEE 1968-2022 (communes)
+
+Pour raccorder la période Clerval (APUR, 1982-1999, quartiers parisiens)
+à la période IRIS (2007-2022, infracommunal), le projet mobilise les
+**séries harmonisées** publiées par l'INSEE (page 1893185). Ces données
+fournissent, pour les **communes** de France métropolitaine et à
+nomenclature stabilisée, la structure socio-professionnelle des actifs
+aux points de recensement 1968, 1975, 1982, 1990, 1999, 2006, 2011, 2016,
+2021.
+
+Choix retenus :
+
+- **Univers de référence** : actifs ayant un emploi (variable `P{YY}_ACT`
+  ou équivalent). C'est le seul univers strictement comparable sur la
+  période, les retraités et inactifs n'étant pas classifiés de manière
+  homogène en 1968 comme en 2021.
+- **Résolution spatiale** : communes entières. Paris apparaît comme une
+  seule commune (75056) dans la plupart des fichiers INSEE — pour le
+  grain arrondissement, il faut utiliser les IRIS (à partir de 2007) ou
+  les 80 quartiers APUR (1982-1999).
+- **Métrique** : `ratio_gentrif` calculé de la même manière qu'aux autres
+  échelles (cf. §2). La trajectoire 2×2 (§2bis) s'applique sans
+  modification, avec t0 = 1968 et t1 = 2021 (ou sous-périodes choisies).
+- **Ruptures internes aux séries longues** : l'INSEE signale quelques
+  révisions mineures de nomenclature entre 1982 et 1999 (réaménagement
+  PCS-1982 → PCS-2003), absorbées par l'harmonisation rétrospective.
+  La série est considérée exploitable telle quelle pour la lecture
+  structurelle visée par le projet.
 
 ## 5. Limites assumées
 
@@ -143,9 +256,13 @@ refontes ponctuelles.
   chaque arrondissement. Une voie d'accès aux fichiers historiques à
   l'IRIS passerait par le CASD ou Progédo.
 - **Volet qualitatif absent**. Voir §1.
-- **Pas de contrôle prix / revenus**. Les données FILOSOFI (revenus
-  IRIS) ne sont pas encore intégrées. Un croisement CSP × revenu × prix
-  immobilier DVF serait une extension naturelle.
+- **Contrôle par les revenus (FiLoSoFi) intégré mais partiel**. La couche
+  revenus (cf. §4.3) est en place (`schemas.filosofi_vars`,
+  `loaders.load_filosofi_iris`, `compute_income_indicators`). Elle permet
+  la triangulation CSP × revenus via la typologie trajectoire (§2bis)
+  appliquée indifféremment à `ratio_gentrif` et `rel_med_uc`. En revanche,
+  les prix immobiliers DVF restent à intégrer pour fermer le triangle
+  CSP × revenu × prix (cf. §7).
 
 ## 6. Reproductibilité
 
@@ -158,14 +275,33 @@ refontes ponctuelles.
 
 ## 7. Extensions envisagées
 
-1. **Intégration de la table de passage IRIS** (Zenodo) pour des
-   comparaisons IRIS-à-IRIS rigoureuses.
-2. **Tendance longue 1968-2022** à partir des séries harmonisées INSEE
-   (communes), pour resituer Clerval dans un temps long.
-3. **Analyse spatiale LISA / Moran local** pour identifier les clusters
-   et outliers, typer les fronts pionniers et les îlots de résistance.
-4. **Croisement FILOSOFI (revenus)** et **DVF (prix immobiliers)** pour
-   documenter la dimension économique de la substitution.
-5. **Volet Grand Paris dédié** : modélisation de la relocalisation
+**En place :**
+
+- ✅ **Typologie trajectoire 2×2** (§2bis) — `classify_trajectory`,
+  `plot_trajectory`. Carte de référence pour caractériser le processus
+  de gentrification, indépendamment de l'état social à une date donnée.
+- ✅ **FiLoSoFi (revenus IRIS)** (§4.3) — `filosofi_vars`,
+  `load_filosofi_iris`, `compute_income_indicators`. Triangulation
+  CSP × revenus via application de la trajectoire 2×2 à `rel_med_uc`.
+- ✅ **Table de passage IRIS** (§4.4) — `harmonize.load_iris_crosswalk`,
+  `apply_crosswalk_wide`. Harmonisation additive des effectifs sur le
+  zonage IRIS cible ; applique l'identité si aucun crosswalk n'est
+  présent, ne modifie donc pas le comportement existant.
+- ✅ **Tendance longue 1968-2022** (§4.5) — `schemas.csp_long_vars`,
+  `loaders.load_long_series`. Séries harmonisées INSEE au niveau
+  commune, ratio_gentrif calculable de 1968 à 2021. Raccord possible
+  avec la période APUR (1982-1999, quartiers) et IRIS (2007-2022).
+
+**Restant à faire :**
+
+1. **Analyse spatiale LISA / Moran local** pour identifier clusters,
+   outliers, fronts pionniers et îlots de résistance. Complément formel
+   à la lecture visuelle des cartes trajectoire.
+2. **DVF (prix immobiliers)** pour documenter la dimension économique de
+   la substitution. DVF est en open data depuis 2014 au niveau
+   transaction — agrégation à l'IRIS à construire.
+3. **Diplômes** comme troisième axe de triangulation (CSP × revenu ×
+   diplôme) via les variables `P{YY}_NSCOL15P_*` INSEE.
+4. **Volet Grand Paris dédié** : modélisation de la relocalisation
    (flux CSP entre 75/92 et 93/94), au-delà de la simple juxtaposition
    cartographique.
