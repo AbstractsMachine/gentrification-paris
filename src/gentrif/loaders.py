@@ -89,21 +89,37 @@ def load_iris(path: Path, year: int, dep_codes: list[str]) -> pd.DataFrame | Non
 # ---------------------------------------------------------------------------
 # Contours géographiques
 # ---------------------------------------------------------------------------
+def _clean_iris_code(raw) -> str:
+    """Extrait un code IRIS à 9 chiffres depuis diverses sérialisations
+    (str, liste Python, JSON array sérialisé en chaîne)."""
+    import re
+    if isinstance(raw, list) and raw:
+        raw = raw[0]
+    s = str(raw).strip()
+    m = re.search(r"\d{9}", s)
+    return m.group(0) if m else s
+
+
 def load_iris_contours_gdf(dep_codes: list[str]) -> gpd.GeoDataFrame | None:
     path = fetch_iris_contours(dep_codes)
     if path is None:
         return None
     gdf = gpd.read_file(path)
+
+    # Les contours opendatasoft stockent iris_code comme liste JSON
+    # (["751135119"]). On normalise systématiquement.
     for c in ["iris_code", "CODE_IRIS", "code_iris", "DCOMIRIS"]:
         if c in gdf.columns:
-            gdf["IRIS"] = gdf[c].astype(str).str.strip()
-            break
-    else:
-        for c in gdf.columns:
-            if gdf[c].dtype == object and \
-               gdf[c].astype(str).str.match(r"^\d{9}$").sum() > 10:
-                gdf["IRIS"] = gdf[c].astype(str).str.strip()
-                break
+            gdf["IRIS"] = gdf[c].map(_clean_iris_code)
+            return gdf
+
+    # Fallback : chercher une colonne contenant des codes à 9 chiffres
+    for c in gdf.columns:
+        if gdf[c].dtype == object:
+            candidate = gdf[c].map(_clean_iris_code)
+            if candidate.str.match(r"^\d{9}$").sum() > 10:
+                gdf["IRIS"] = candidate
+                return gdf
     return gdf
 
 
