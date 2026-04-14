@@ -1,53 +1,59 @@
-# Gentrification Paris & Grand Paris
+# Gentrification Paris & Grand Paris — Contexte Claude Code
 
-## Contexte
-Actualisation et extension des travaux d'Anne Clerval (2010), "Les dynamiques spatiales de la gentrification à Paris", Cybergeo n°505. https://doi.org/10.4000/cybergeo.23231
+Projet d'actualisation et d'extension des travaux de Clerval (2010),
+*Les dynamiques spatiales de la gentrification à Paris*, Cybergeo n°505
+(<https://doi.org/10.4000/cybergeo.23231>).
 
-## Objectif
-Reproduire et étendre l'analyse de la gentrification parisienne avec les données actuelles :
-- **1982-1999** : 80 quartiers administratifs de Paris (source APUR)
-- **2007-2022** : IRIS (~900 Paris, ~3000 petite couronne) (source INSEE)
-- **1968-2022** : données harmonisées communales pour la tendance longue
-- **Périmètres** : Paris intra-muros (75) + Petite couronne (92, 93, 94)
+## Objectif scientifique
+Prolonger l'analyse quantitative de Clerval dans l'espace (Paris + petite
+couronne) et dans le temps (1982 → 2022), en documentant explicitement
+les choix méthodologiques (voir `METHODOLOGY.md`).
 
-## Métrique principale
-**Ratio CPIS / (ouvriers + employés)** — indicateur de substitution sociale, calculable à toutes les échelles et toutes les dates.
+## Architecture
 
-### Ruptures de série à gérer
-- 2007-2021 : ancienne PCS, variables `C{YY}_POP15P_CS{N}`, retraités = CS7 (non reclassés)
-- 2022+ : PCS 2020, variables `C22_POP15P_STAT_GSEC{XX}_{YY}`, retraités reclassés par ancienne CSP (GSEC13_23 = CPIS actifs + retraités ex-CPIS)
-- 1982-1999 : données APUR au niveau quartier, population des ménages classée par CSP de la personne de référence
-
-## Sources de données
-
-| Données | URL | Format |
-|---------|-----|--------|
-| IRIS Population 2007 | https://www.insee.fr/fr/statistiques/2028650 | XLS |
-| IRIS Population 2012 | https://www.insee.fr/fr/statistiques/2028582 | XLS |
-| IRIS Population 2017 | https://www.insee.fr/fr/statistiques/4799309 | CSV |
-| IRIS Population 2022 | https://www.insee.fr/fr/statistiques/8647014 | CSV |
-| APUR Paris 1954-1999 | https://www.apur.org/sites/default/files/documents/paris.pdf | PDF |
-| Harmonisées 1968-2022 | https://www.insee.fr/fr/statistiques/1893185 | XLS |
-| Contours IRIS | https://public.opendatasoft.com/explore/dataset/georef-france-iris/ | GeoJSON |
-| Contours 80 quartiers | https://opendata.paris.fr/explore/dataset/quartier_paris/ | GeoJSON |
-
-## Structure du projet
 ```
-data/             # Données téléchargées (gitignored)
-output/           # Cartes et CSV produits (gitignored)
-main.py           # Script principal unique
-requirements.txt
-CLAUDE.md         # Ce fichier
-.gitignore
+src/gentrif/        Package importable
+  config.py         Chemins, périmètres, 80 quartiers, catégories synthèse
+  schemas.py        Mapping CSP par année (PCS 2003 vs PCS 2020)
+  fetch.py          Téléchargement + checksums SHA-256
+  io.py             Lecture bas-niveau CSV/XLS (dialectes INSEE)
+  indicators.py     compute_indicators(), classify_gentrification()
+  harmonize.py      to_long() -> schéma canonique, stub crosswalk IRIS
+  loaders.py        load_iris(), load_historical_quartiers(), contours
+  viz/              plot_map, plot_multitemp, plot_synthesis, hist_maps
+
+scripts/            CLI en 3 étapes : fetch_all → build_processed → generate_maps
+notebooks/          Analyses narrées (Quarto .qmd)
+tests/              pytest — validation des indicateurs
+data/raw|interim|processed/
+output/figures|tables|report/
 ```
+
+## Principes directeurs
+- **Raw jamais modifié** : toute transformation passe par `interim/`
+  puis `processed/`.
+- **Format long canonique** : `(year, geo_level, geo_code, geo_name,
+  indicator, value)` en parquet dans `data/processed/`.
+- **Métrique centrale** : `ratio_gentrif = pct_cpis / pct_classes_pop`
+  (substitution sociale).
+- **Ruptures de série documentées** (`METHODOLOGY.md` §4) : PCS 2020 en
+  2022 agrège retraités reclassés → surévaluation locale de la croissance
+  CPIS à interpréter.
+- **Provenance** : chaque source est listée dans `data/raw/MANIFEST.md`
+  avec URL, date d'accès, SHA-256.
 
 ## Commandes
 ```bash
-pip install -r requirements.txt
-python main.py                    # Lance tout
-python main.py --historical       # Module historique seul
-python main.py --iris             # Module IRIS seul
+pip install -e .[dev]
+python scripts/fetch_all.py
+python scripts/build_processed.py
+python scripts/generate_maps.py
+pytest
 ```
 
-## Stack
-Python 3.10+, pandas, geopandas, matplotlib, mapclassify, pdfplumber, requests
+## Extensions à venir (cf. `METHODOLOGY.md` §7)
+1. Intégration table de passage IRIS (Zenodo)
+2. Tendance longue 1968-2022 (communes, séries harmonisées INSEE)
+3. Analyse LISA / Moran local
+4. Croisement FILOSOFI + DVF
+5. Modélisation de la relocalisation des classes populaires en petite couronne

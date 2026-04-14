@@ -1,0 +1,46 @@
+---
+title: "Synthèse — actualisation de Clerval (2010)"
+subtitle: "40 ans de gentrification à Paris et en petite couronne"
+author: "Daniel"
+format:
+  html:
+    toc: true
+    number-sections: true
+  pdf:
+    documentclass: article
+    toc: true
+---
+
+# Introduction
+
+Rappel du questionnement de Clerval (2010) : cartographier les
+dynamiques spatiales de la gentrification à Paris sur la période
+1982-1999. Ce notebook synthétise les résultats actualisés du présent
+projet (2007-2022 à l'IRIS, 1982-1999 à l'échelle des 80 quartiers
+APUR) et les met en regard.
+
+# Trois échelles, trois temporalités
+
+| Période      | Échelle     | Couverture                      | Notebook      |
+|--------------|-------------|---------------------------------|---------------|
+| 1982-1999    | Quartier    | Paris intra-muros (80 unités)   | (historique)  |
+| 2007-2022    | IRIS        | Grand Paris (~3900 IRIS)        | 02, 03        |
+| 1968-2022    | Commune     | Grand Paris (~130 communes)     | 04            |
+
+# Continuité et extension
+
+- Figure 1 : comparaison 1999 (quartier) vs 2007 (IRIS agrégé) →
+  validation de la continuité spatiale.
+- Figure 2 : carte de synthèse 2022 (type Fig. 6 Clerval étendue au
+  Grand Paris).
+- Figure 3 : trajectoires 2007 → 2022 par IRIS (clustering).
+
+# Limites et agenda
+
+- Rupture de mesure 2017/2022 (PCS 2020, cf. METHODOLOGY §4.1).
+- Absence du volet qualitatif (cf. METHODOLOGY §1).
+- Harmonisation IRIS inter-millésimes à finaliser (crosswalk Zenodo).
+
+# Références
+
+Voir `REFERENCES.bib`. Citation principale : @clerval2010.

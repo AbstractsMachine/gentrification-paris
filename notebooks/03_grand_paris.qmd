@@ -1,0 +1,52 @@
+---
+title: "Extension Grand Paris — franchissement du périphérique"
+subtitle: "Dynamiques différenciées 75 / 92 / 93 / 94"
+format: html
+---
+
+# Hypothèse
+
+La gentrification ne se limite pas à Paris intra-muros : elle déborde
+en petite couronne selon des logiques différenciées. Les Hauts-de-Seine
+(92) sont historiquement en partie gentrifiés ; la Seine-Saint-Denis (93)
+et le Val-de-Marne (94) connaissent des dynamiques plus récentes et
+plus hétérogènes.
+
+> **Dépasser la cartographie.** La vraie story n'est pas juste
+> « la gentrification s'étend » mais aussi la **relocalisation** des
+> classes populaires vers le 93/94 tandis que 75/92 se gentrifient.
+> Une approche en flux/substitution est nécessaire en complément des
+> cartes statiques.
+
+# Données
+
+```{python}
+import pandas as pd
+from gentrif.config import DATA_PROCESSED
+
+long = pd.read_parquet(DATA_PROCESSED / "iris_long.parquet")
+long["dep"] = long["geo_code"].str[:2]
+```
+
+# Moyennes départementales par millésime
+
+```{python}
+(long.query("indicator == 'ratio_gentrif'")
+     .groupby(["year", "dep"])["value"]
+     .mean()
+     .unstack("dep"))
+```
+
+# Analyse LISA (à faire)
+
+TODO : clusters Moran local du `ratio_gentrif` pour 2022, sur
+l'ensemble du Grand Paris, avec matrice de contiguïté Queen.
+
+Outils : `pysal.explore.esda`, `libpysal.weights.Queen`.
+
+# Points à documenter
+
+- Combien d'IRIS 93/94 connaissent une baisse du ratio entre 2007 et
+  2022 (déclassement) vs hausse (gentrification) ?
+- Gradient radial vs effet de couloirs (Ligne 14, RER, Grand Paris
+  Express) ?

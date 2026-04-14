@@ -1,0 +1,47 @@
+---
+title: "Exploration IRIS 2022 — état des lieux"
+subtitle: "Paris + petite couronne, PCS 2020"
+author: "Daniel"
+date: today
+format:
+  html:
+    toc: true
+    code-fold: true
+---
+
+# Objectif
+
+Explorer la structure socio-spatiale du Grand Paris à l'échelle IRIS
+sur la dernière vague du recensement disponible (2022, PCS 2020).
+
+> **Note méthodologique.** En PCS 2020, les variables `GSEC{XX}_{YY}`
+> agrègent actifs et retraités reclassés. Voir `METHODOLOGY.md` §4.1.
+
+```{python}
+import pandas as pd
+from gentrif.config import DATA_PROCESSED
+
+long = pd.read_parquet(DATA_PROCESSED / "iris_long.parquet")
+iris_2022 = long.query("year == 2022 and geo_level == 'iris'")
+iris_2022.head()
+```
+
+# Distribution des indicateurs
+
+```{python}
+iris_2022.pivot_table(index="indicator", values="value",
+                     aggfunc=["count", "mean", "median", "std"])
+```
+
+# Cartes
+
+```{python}
+# TODO: reprendre plot_map(contours merged) pour pct_cpis, pct_classes_pop,
+# ratio_gentrif, pct_etr.
+```
+
+# Questions ouvertes
+
+- Où sont les IRIS à ratio_gentrif > 5 ? (gentrification extrême ou beau quartier historique)
+- Corrélation avec la proximité au périphérique ?
+- Où sont les *pôles de résistance* (forte part étrangère + faible ratio) ?

@@ -1,20 +1,29 @@
-# Données et sorties (volumineux, reproductibles)
-data/
+# --- Données brutes, intermédiaires et sorties ---
+# (MANIFEST.md reste versionné, cf. règle négative plus bas)
+data/raw/*
+!data/raw/MANIFEST.md
+data/interim/
+data/processed/
 output/
 
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
 *.egg-info/
+build/
+dist/
 .venv/
 venv/
 env/
 
-# IDE
+# --- Jupyter / Quarto ---
+.ipynb_checkpoints/
+.quarto/
+*_files/
+*.quarto_ipynb
+
+# --- Éditeurs / OS ---
 .vscode/
 .idea/
 *.swp
 .DS_Store
-
-# Jupyter
-.ipynb_checkpoints/

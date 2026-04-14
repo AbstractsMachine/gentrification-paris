@@ -1,0 +1,36 @@
+---
+title: "Tendance longue 1968 → 2022"
+subtitle: "Séries harmonisées INSEE, échelle communale / arrondissement"
+format: html
+---
+
+# Objectif
+
+Resituer les dynamiques contemporaines dans le temps long. Les fichiers
+IRIS publics ne remontent pas avant 2006, mais l'INSEE publie des
+**séries harmonisées** 1968-2022 à l'échelle communale (et arrondissement
+pour Paris), avec une nomenclature CSP stabilisée rétrospectivement
+pour les actifs 25-54 ans.
+
+Référence : INSEE, *Évolution et structure de la population*, 1968-2022,
+<https://www.insee.fr/fr/statistiques/1893185>.
+
+# Statut
+
+📦 À implémenter :
+
+1. Télécharger le fichier harmonisé (XLS) dans `data/raw/`.
+2. Ajouter un loader `loaders.load_series_longues_insee()`.
+3. Pivot long avec `geo_level = "commune"`.
+4. Cartes séquentielles sur 9 recensements.
+
+# Plan d'analyse
+
+- Trajectoire de chaque arrondissement de Paris + chaque commune 92/93/94.
+- Année d'inflexion (où le ratio CPIS/populaires passe ≥ 1) par commune.
+- Comparaison Paris vs petite couronne : timing différencié.
+
+```{python}
+# Placeholder
+print("À implémenter : loader séries longues INSEE.")
+```

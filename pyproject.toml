@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gentrif"
+version = "0.1.0"
+description = "Analyse spatiale de la gentrification à Paris et en petite couronne (1982-2022), actualisation de Clerval (2010)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "CC-BY-4.0" }
+authors = [
+    { name = "Daniel" }
+]
+keywords = ["gentrification", "geographie", "paris", "iris", "insee", "clerval"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: Creative Commons Attribution 4.0",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Sociology",
+]
+
+dependencies = [
+    "pandas>=1.5",
+    "geopandas>=0.12",
+    "shapely>=2.0",
+    "matplotlib>=3.6",
+    "mapclassify>=2.5",
+    "requests>=2.28",
+    "openpyxl>=3.0",
+    "xlrd>=2.0",
+    "pdfplumber>=0.9",
+    "pyarrow>=14.0",       # parquet
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "jupyter>=1.0",
+    "nbclient>=0.8",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+gentrif = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"

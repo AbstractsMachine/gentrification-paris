@@ -1,0 +1,45 @@
+---
+title: "Évolution à Paris intra-muros, 2007 → 2022"
+subtitle: "IRIS, 4 millésimes du recensement rénové"
+format: html
+---
+
+# Question
+
+Les dynamiques décrites par Clerval pour 1982-1999 se prolongent-elles
+entre 2007 et 2022 ? Quels quartiers basculent ?
+
+# Données
+
+- `data/processed/iris_long.parquet` filtré sur `DEP == "75"` et
+  `year in {2007, 2012, 2017, 2022}`.
+- Contours IRIS 75 (Opendatasoft).
+
+```{python}
+import pandas as pd
+from gentrif.config import DATA_PROCESSED
+
+long = pd.read_parquet(DATA_PROCESSED / "iris_long.parquet")
+# geo_code commence par "75" pour Paris
+paris = long[long["geo_code"].str.startswith("75")]
+```
+
+# Évolution du ratio de substitution
+
+```{python}
+r = (paris.query("indicator == 'ratio_gentrif'")
+      .pivot_table(index="geo_code", columns="year", values="value"))
+r.describe()
+```
+
+# Typologie des trajectoires
+
+TODO : clustering des trajectoires (2007, 2012, 2017, 2022) pour
+identifier les *patterns* : déjà gentrifié, en cours, résistant,
+déclassement.
+
+# Discussion — rupture PCS 2020
+
+La comparaison 2017 vs 2022 est à lire avec précaution (reclassement
+des retraités ex-CPIS). Quantifier l'écart en isolant les IRIS à
+forte part de retraités.
