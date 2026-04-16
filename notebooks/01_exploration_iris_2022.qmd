@@ -35,9 +35,35 @@ iris_2022.pivot_table(index="indicator", values="value",
 
 # Cartes
 
+On projette les quatre indicateurs structurants sur les contours IRIS du
+Grand Paris. Discrétisation en quantiles (k=7) calculés sur le périmètre
+affiché — les échelles ne sont donc pas comparables entre indicateurs.
+
 ```{python}
-# TODO: reprendre plot_map(contours merged) pour pct_cpis, pct_classes_pop,
-# ratio_gentrif, pct_etr.
+from gentrif.config import DEPS_GRAND_PARIS, OUT_FIGURES
+from gentrif.loaders import load_iris_contours_gdf
+from gentrif.viz import plot_map
+
+wide_2022 = (iris_2022.pivot_table(index="geo_code", columns="indicator",
+                                   values="value", aggfunc="first")
+                      .reset_index()
+                      .rename(columns={"geo_code": "IRIS"}))
+
+contours = load_iris_contours_gdf(DEPS_GRAND_PARIS)
+gdf = contours.merge(wide_2022, on="IRIS", how="inner")
+
+fig_dir = OUT_FIGURES / "notebook_01"
+fig_dir.mkdir(parents=True, exist_ok=True)
+
+specs = [
+    ("pct_cpis",        "CPIS — Grand Paris (2022)",                  "Blues"),
+    ("pct_classes_pop", "Ouv.+Empl. — Grand Paris (2022)",            "Reds"),
+    ("ratio_gentrif",   "Ratio CPIS / cl. pop. — Grand Paris (2022)", "Purples"),
+    ("pct_etr",         "Pop. étrangère — Grand Paris (2022)",        "YlOrRd"),
+]
+for col, title, cmap in specs:
+    if col in gdf.columns and gdf[col].notna().any():
+        plot_map(gdf, col, title, fig_dir / f"iris_2022_{col}.png", cmap=cmap)
 ```
 
 # Questions ouvertes
